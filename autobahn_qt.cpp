@@ -363,6 +363,22 @@ namespace Autobahn {
       std::string val = value.toByteArray().toStdString();
       m_packer.pack(val);
     }
+    else if (value.type() == QVariant::Date) {
+      std::string val = value.toDate().toString(Qt::DateFormat::ISODate).toStdString();
+      m_packer.pack(val);
+    }
+    else if (value.type() == QVariant::DateTime) {
+      std::string val = value.toDateTime().toString(Qt::DateFormat::ISODate).toStdString();
+      m_packer.pack(val);
+    }
+    else if (value.type() != QVariant::UserType && QMetaType(value.type()).flags() & QMetaType::IsEnumeration) {
+      std::string val = value.toString().toStdString();
+      m_packer.pack(val);
+    }
+    else if (value.type() == QVariant::UserType && QMetaType(value.userType()).flags() & QMetaType::IsEnumeration) {
+      std::string val = value.toString().toStdString();
+      m_packer.pack(val);
+    }
     else {
       qDebug() << "Warning: don't know how to pack type" << value.typeName();
     }
