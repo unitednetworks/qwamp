@@ -121,20 +121,33 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
         });
 
         for (int i = 0; i < args.count(); ++i) {
-          if (args[i].isValid() && !service->paramConverters.contains(metaMethod.parameterType(i))) {
-            throw std::runtime_error(QString(metaMethod.name() + ": no converter for parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-          }
-          if (args[i].isValid()) {
-            param[i + 1] = service->paramConverters[metaMethod.parameterType(i)](args[i]);
-            if (!param[i + 1]) {
-              throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
+          if (args[i].type() == QVariant::String && QMetaType::typeFlags(metaMethod.parameterType(i)) & QMetaType::IsEnumeration && !args[i].toString().isEmpty()) {
+            const QMetaObject *mo = QMetaType::metaObjectForType(metaMethod.parameterType(i));
+            QString pt = metaMethod.parameterTypes()[i];
+            pt = pt.mid(pt.lastIndexOf(':') + 1);
+            int ei = mo->indexOfEnumerator(pt.toUtf8().constData());
+            if (ei == -1) {
+              throw std::runtime_error(QString("can't find enum " + pt).toStdString());
             }
+            int enumValue = mo->enumerator(ei).keyToValue(args[i].toString().toUtf8().constData());
+            param[i + 1] = new int(enumValue);
           }
           else {
-            param[i + 1] = QMetaType::create(metaMethod.parameterType(i));
-          }
-          if (args[i].isValid() && !args[i].canConvert(metaMethod.parameterType(i))) {
-            throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
+            if (args[i].isValid() && !service->paramConverters.contains(metaMethod.parameterType(i))) {
+              throw std::runtime_error(QString(metaMethod.name() + ": no converter for parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
+            }
+            if (args[i].isValid()) {
+              param[i + 1] = service->paramConverters[metaMethod.parameterType(i)](args[i]);
+              if (!param[i + 1]) {
+                throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
+              }
+            }
+            else {
+              param[i + 1] = QMetaType::create(metaMethod.parameterType(i));
+            }
+            if (args[i].isValid() && !args[i].canConvert(metaMethod.parameterType(i))) {
+              throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
+            }
           }
 //          if (args[i].isValid()) {
 //            if (metaMethod.parameterType(i) == QMetaType::QTime) {
