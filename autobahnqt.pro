@@ -27,3 +27,9 @@ HEADERS +=\
 
 DISTFILES += \
     autobahnqt.pri
+
+MBASE_DIR=../../mbase
+
+DEFINES += RET_JOIN PSQL USE_QT
+
+INCLUDEPATH += $${MBASE_DIR}

@@ -34,25 +34,142 @@ void CrossbarService::setPrefix(const QString &s) {
   m_prefix = s;
 }
 
-void CrossbarService::registerParamConverter(int type, CrossbarService::ParamConverter converter) {
-  paramConverters[type] = converter;
-}
-
 void CrossbarService::registerBasicParamConverters() {
-  registerSimpleParamConverter(QMetaType::QString, &QVariant::toString);
-  registerSimpleParamConverter(QMetaType::Bool, &QVariant::toBool);
-  registerSimpleParamConverter(QMetaType::Int, [](const QVariant &v) { return v.toInt(); });
-  registerParamConverter(QMetaType::QTime, qTimeConverter);
+  registerSimpleParamConverter<QString>(&QVariant::toString);
+  registerSimpleParamConverter<bool>(&QVariant::toBool);
+  registerSimpleParamConverter<int>([](const QVariant &v) { return v.toInt(); });
+  registerParamConverter<QTime>(qTimeParamConverter);
+
+  registerResultConverter<QTime>(qTimeResultConverter);
+  registerResultConverter<QDateTime>(qDateTimeResultConverter);
 }
 
-void *CrossbarService::qTimeConverter(const QVariant &v) {
+void CrossbarService::qTimeParamConverter(QTime &time, const QVariant &v) {
   if (v.canConvert(QMetaType::QString)) {
-    QTime t = QTime::fromString(v.toString(), "HH:mm");
-    if (t.isValid()) {
-      return new QTime(t);
+    time = QTime::fromString(v.toString(), "HH:mm");
+  }
+  if (!time.isValid()) {
+    throw std::runtime_error("Invalid conversion to QTime");
+  }
+}
+
+void CrossbarService::qTimeResultConverter(QVariant &res, const QTime &time) {
+  res = QVariant(time.toString("HH:mm"));
+}
+
+void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &dateTime) {
+  res = QVariant(dateTime.toString(Qt::DateFormat::ISODate));
+}
+
+CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaMethod &metaMethod, int i) const {
+  int parameterType = metaMethod.parameterType(i);
+  if (QMetaType::typeFlags(parameterType) & QMetaType::IsEnumeration) {
+    const QMetaObject *mo = QMetaType::metaObjectForType(parameterType);
+    QString pt = metaMethod.parameterTypes()[i];
+    pt = pt.mid(pt.lastIndexOf(':') + 1);
+    int ei = mo->indexOfEnumerator(pt.toUtf8().constData());
+    if (ei == -1) {
+      throw std::runtime_error(QString("can't find enum " + pt).toStdString());
+    }
+    QMetaEnum enumerator = mo->enumerator(ei);
+    return [enumerator](void *t, const QVariant &v) {
+      if (v.type() != QVariant::String && v.type() != QVariant::Int && v.type() != QVariant::UInt && v.type() != QVariant::ULongLong) {
+        throw std::runtime_error("Enum argument must be passed as string or int");
+      }
+      int *enumValue = (int *)t;
+      if (v.type() == QVariant::String) {
+        QString vs = v.toString();
+        if (vs.isEmpty()) {
+          throw std::runtime_error("String enum argument must not be empty");
+        }
+        *enumValue = enumerator.keyToValue(vs.toUtf8().constData());
+      }
+      else {
+        *enumValue = v.toInt();
+      }
+    };
+  }
+  else {
+    if (paramConverters.contains(parameterType)) {
+      return paramConverters[parameterType];
+    }
+    else if (QMetaType::hasRegisteredConverterFunction(qMetaTypeId<QVariant>(), parameterType)){
+      return [parameterType](void *v, const QVariant &arg) {
+        QMetaType::convert(&arg, qMetaTypeId<QVariant>(), v, parameterType);
+      };
+    }
+    else {
+      return 0;
     }
   }
-  return 0;
+}
+
+class no_converter_error : public std::runtime_error {
+  public:
+    inline no_converter_error() : std::runtime_error(std::string()) {}
+};
+
+void *CrossbarService::convertParameter(const QVariant &arg, int parameterType, VoidParamConverter converter) {
+  void *v = QMetaType::create(parameterType);
+  try {
+    if (arg.isValid()) {
+      if (converter) {
+        converter(v, arg);
+      }
+      else if (arg.canConvert(parameterType)) {
+        arg.convert(parameterType, v);
+      }
+      else {
+        throw no_converter_error();
+      }
+    }
+  }
+  catch(...) {
+    QMetaType::destroy(parameterType, v);
+    throw;
+  }
+  return v;
+}
+
+CrossbarService::VoidResultConverter CrossbarService::resultConverter(int returnType) const {
+  if (resultConverters.contains(returnType)) {
+    return resultConverters[returnType];
+  }
+  else if (QMetaType::hasRegisteredConverterFunction(returnType, qMetaTypeId<QVariant>())){
+    return [returnType](QVariant &res, const void *v) {
+      QMetaType::convert(v, returnType, &res, qMetaTypeId<QVariant>());
+    };
+  }
+  else if (returnType >= QMetaType::User && QMetaType::hasRegisteredConverterFunction(returnType, qMetaTypeId<QVariantMap>())) {
+    return [returnType](QVariant &res, const void *v) {
+      QVariantMap map;
+      QMetaType::convert(v, returnType, &map, qMetaTypeId<QVariantMap>());
+      res = QVariant(map);
+    };
+  }
+  else if (returnType >= QMetaType::User && QMetaType::hasRegisteredConverterFunction(returnType, qMetaTypeId<QVariantList>())) {
+    return [returnType](QVariant &res, const void *v) {
+      QVariantList list;
+      QMetaType::convert(v, returnType, &list, qMetaTypeId<QVariantList>());
+      res = QVariant(list);
+    };
+  }
+  else {
+    return 0;
+  }
+}
+
+QVariant CrossbarService::convertResult(void *result, int returnType, VoidResultConverter converter) {
+  QVariant res;
+  if (returnType != QMetaType::Void) {
+    if (converter) {
+      converter(res, result);
+    }
+    else {
+      res = QVariant(returnType, result);
+    }
+  }
+  return res;
 }
 
 void CrossbarService::registerServices(Autobahn::Session &session) {
@@ -61,7 +178,7 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
   }
   for (CrossbarService *service : *services) {
     const QMetaObject *metaObject = service->metaObject();
-    for(int methodOffset = metaObject->methodOffset(); methodOffset < metaObject->methodCount(); ++methodOffset) {
+    for (int methodOffset = metaObject->methodOffset(); methodOffset < metaObject->methodCount(); ++methodOffset) {
       QMetaMethod metaMethod = metaObject->method(methodOffset);
       if (metaMethod.access() != QMetaMethod::Public) {
         continue;
@@ -85,29 +202,22 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
       QString crossbarMethodName = nameParts.join(".");
       qDebug() << "Registering" << crossbarMethodName;
 
-      auto endpoint = [service, metaMethod, methodOffset, crossbarMethodName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
+      QList<VoidParamConverter> paramConverters;
+      for (int i = 0; i < metaMethod.parameterCount(); ++i) {
+        paramConverters.push_back(service->paramConverter(metaMethod, i));
+      }
+      int returnType = metaMethod.returnType();
+      VoidResultConverter resultConverter = service->resultConverter(returnType);
+
+      auto endpoint = [service, metaMethod, methodOffset, crossbarMethodName, paramConverters, returnType, resultConverter](const QVariantList &args, const QVariantMap &kwargs) -> QVariant {
         Q_UNUSED(kwargs);
         qDebug() << "Called" << crossbarMethodName << "with:" << args;
         if (metaMethod.parameterCount() != args.count()) {
           throw std::runtime_error("bad argument count");
         }
-        int returnType = metaMethod.returnType();
-//        const QMetaObject *returnMetaObject = QMetaType::metaObjectForType(returnType);
-        void *result = 0;
-        if (returnType != QMetaType::Void) {
-          result = QMetaType::create(returnType);
-        }
 
-//        if (!QVariant::canConvert(metaMethod.returnType())) {
-//          qDebug() << "Cannot register method" << crossbarMethodName << "because return type cannot be converted to QVariant";
-//          continue;
-//        }
-
-        void *param[11];
-        param[0] = result;
-        for (int i = 1; i < 11; ++i) {
-          param[i] = 0;
-        }
+        void *result = (returnType == QMetaType::Void) ? 0 : QMetaType::create(returnType);
+        void *param[11] = { result, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
 
         Cleaner cleaner([&result, &param, &returnType, &metaMethod]() {
           if (result) {
@@ -121,73 +231,18 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
         });
 
         for (int i = 0; i < args.count(); ++i) {
-          if (args[i].type() == QVariant::String && QMetaType::typeFlags(metaMethod.parameterType(i)) & QMetaType::IsEnumeration && !args[i].toString().isEmpty()) {
-            const QMetaObject *mo = QMetaType::metaObjectForType(metaMethod.parameterType(i));
-            QString pt = metaMethod.parameterTypes()[i];
-            pt = pt.mid(pt.lastIndexOf(':') + 1);
-            int ei = mo->indexOfEnumerator(pt.toUtf8().constData());
-            if (ei == -1) {
-              throw std::runtime_error(QString("can't find enum " + pt).toStdString());
-            }
-            int enumValue = mo->enumerator(ei).keyToValue(args[i].toString().toUtf8().constData());
-            param[i + 1] = new int(enumValue);
+          try {
+            param[i + 1] = convertParameter(args[i], metaMethod.parameterType(i), paramConverters[i]);
           }
-          else {
-            if (args[i].isValid() && !service->paramConverters.contains(metaMethod.parameterType(i))) {
-              throw std::runtime_error(QString(metaMethod.name() + ": no converter for parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-            }
-            if (args[i].isValid()) {
-              param[i + 1] = service->paramConverters[metaMethod.parameterType(i)](args[i]);
-              if (!param[i + 1]) {
-                throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-              }
-            }
-            else {
-              param[i + 1] = QMetaType::create(metaMethod.parameterType(i));
-            }
-            if (args[i].isValid() && !args[i].canConvert(metaMethod.parameterType(i))) {
-              throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-            }
+          catch(const no_converter_error &) {
+            throw std::runtime_error(QString(metaMethod.name() + ": no converter for parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
           }
-//          if (args[i].isValid()) {
-//            if (metaMethod.parameterType(i) == QMetaType::QTime) {
-//              QTime *t = (QTime *)param[i + 1];
-//              *t = QTime::fromString(args[i].toString(), "HH:mm");
-//              if (!t->isValid()) {
-//                throw std::runtime_error(QString("can't convert input parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-//              }
-//            }
-//            else {
-//              args[i].convert(metaMethod.parameterType(i), param[i + 1]);
-//              if (metaMethod.parameterType(i) == QMetaType::QString) {
-//                QString *s = (QString *)param[i + 1];
-//                *s = args[i].toString();
-//                qDebug() << args[i] << args[i].toString() << "param" << i << (*s);
-//              }
-//            }
-//          }
         }
+
         if (!service->qt_metacall(QMetaObject::InvokeMetaMethod, methodOffset, param)) {
           throw std::runtime_error(QString("error invoking method" + crossbarMethodName).toStdString());
         }
-        QVariant res;
-        if (returnType == QMetaType::QDateTime) {
-          QDateTime *d = (QDateTime *)result;
-          res = QVariant(d->toString(Qt::DateFormat::ISODate));
-        }
-        else if (returnType == QMetaType::QTime) {
-          QTime *t = (QTime *)result;
-          res = QVariant(t->toString("HH:mm"));
-        }
-        else if (returnType >= QMetaType::User && QMetaType::hasRegisteredConverterFunction(returnType, qMetaTypeId<QVariantMap>())) {
-          QVariantMap map;
-          QMetaType::convert(result, returnType, &map, qMetaTypeId<QVariantMap>());
-          res = QVariant(map);
-        }
-        else if (result) {
-          res = QVariant(returnType, result);
-        }
-        return res;
+        return convertResult(result, returnType, resultConverter);
       };
 
       if (wrapper) {
