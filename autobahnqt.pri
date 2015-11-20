@@ -1,4 +1,5 @@
 INCLUDEPATH += $$PWD
+DEPENDPATH += $$PWD
 
 debug: LIBS += -L $$PWD/debug
 release: LIBS += -L $$PWD/release
