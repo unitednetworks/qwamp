@@ -586,7 +586,7 @@ namespace Autobahn {
 
         // FIXME: handle other error messages
       default:
-        qDebug() << "unhandled ERROR message";
+        qDebug() << "unhandled ERROR message" << (int)request_type;
     }
   }
 
