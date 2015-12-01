@@ -4,6 +4,8 @@
 #
 #-------------------------------------------------
 
+include(../mbase/mbase.pri)
+
 QT       -= gui
 
 TARGET = autobahnqt
@@ -15,7 +17,7 @@ QMAKE_CXXFLAGS += -Wno-unused-parameter   #kvuli msgpack
 QMAKE_CXXFLAGS += -pthread
 QMAKE_CXXFLAGS_DEBUG += -DDEBUG
 
-INCLUDEPATH += /home/martin/CVS/msgpack_gcc/include
+INCLUDEPATH += ../msgpack-c/include
 
 SOURCES += \
     autobahn_qt.cpp \
@@ -27,9 +29,3 @@ HEADERS +=\
 
 DISTFILES += \
     autobahnqt.pri
-
-MBASE_DIR=../../mbase
-
-DEFINES += RET_JOIN PSQL USE_QT
-
-INCLUDEPATH += $${MBASE_DIR}
