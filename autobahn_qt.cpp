@@ -926,7 +926,9 @@ namespace Autobahn {
   void Session::get_msg_header() {
     m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
 
-    m_msg_len = ntohl(*((uint32_t*) &m_buffer_msg_len));
+    uint32_t *m_buffer_msg_len_p = (uint32_t*) &m_buffer_msg_len;
+    m_msg_len = ntohl(*m_buffer_msg_len_p);
+//    m_msg_len = ntohl(*((uint32_t*) &m_buffer_msg_len));
 
     if (m_debug) {
       qDebug() << "RX message (" << m_msg_len << " octets) ...";
