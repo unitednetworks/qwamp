@@ -1,4 +1,3 @@
-
 #include "crossbarservice.h"
 
 #include <QDebug>
@@ -110,6 +109,11 @@ class no_converter_error : public std::runtime_error {
     inline no_converter_error() : std::runtime_error(std::string()) {}
 };
 
+class QEVariant : public QVariant {
+  public:
+    inline bool convert(const int type, void *ptr) const { return QVariant::convert(type, ptr); }
+};
+
 void *CrossbarService::convertParameter(const QVariant &arg, int parameterType, VoidParamConverter converter) {
   void *v = QMetaType::create(parameterType);
   try {
@@ -118,7 +122,7 @@ void *CrossbarService::convertParameter(const QVariant &arg, int parameterType, 
         converter(v, arg);
       }
       else if (arg.canConvert(parameterType)) {
-        arg.convert(parameterType, v);
+        ((const QEVariant &)arg).convert(parameterType, v);
       }
       else {
         throw no_converter_error();
