@@ -119,7 +119,7 @@ namespace Autobahn {
        * @param in The input stream to run this session on.
        * @param out The output stream to run this session on.
        */
-      Session(QIODevice &in, QIODevice &out, bool debug = false);
+      Session(QIODevice &in, QIODevice &out, bool debug_calls = false, bool debug = false);
 
       /**
        * Start listening on the IStream provided to the constructor
@@ -311,6 +311,7 @@ namespace Autobahn {
 
       void got_msg(const msgpack::object& obj);
 
+      bool m_debug_calls;
       bool m_debug;
       bool m_stopped;
 
