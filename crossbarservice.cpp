@@ -240,7 +240,6 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
 
       auto endpoint = [service, crossbarMethodName, methodList](const QVariantList &args, const QVariantMap &kwargs) -> QVariant {
         Q_UNUSED(kwargs);
-        qDebug() << "Called" << crossbarMethodName << "with:" << args;
         auto methodIterator = methodList.find(args.count());
         if (methodIterator == methodList.end()) {
           throw std::runtime_error("bad argument count");

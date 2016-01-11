@@ -31,8 +31,9 @@
 
 namespace Autobahn {
 
-  Session::Session(QIODevice &in, QIODevice &out, bool debug)
+  Session::Session(QIODevice &in, QIODevice &out, bool debug_calls, bool debug)
     : QObject(0),
+      m_debug_calls(debug_calls),
       m_debug(debug),
       m_stopped(false),
       m_in(in),
@@ -160,7 +161,22 @@ namespace Autobahn {
      }
 
      m_request_id += 1;
-     Endpoint endpoint({ endpointFunction, endpointType });
+     Endpoint endpoint;
+     if (m_debug_calls) {
+       Endpoint::Function wrappedEndpointFunction = [endpointFunction, procedure](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
+         QTime timer;
+         timer.start();
+         qDebug() << "Called" << procedure << "with" << args;
+         QVariant result = endpointFunction(args, kwargs);
+         qDebug() << "execution elapsed" << timer.elapsed() << "ms";
+         return result;
+       };
+       endpoint = { wrappedEndpointFunction, endpointType };
+     }
+     else {
+       endpoint = { endpointFunction, endpointType };
+     }
+
      registerRequests.insert(m_request_id, RegisterRequest(procedure, endpoint));
 
      // [REGISTER, Request|id, Options|dict, Procedure|uri]
