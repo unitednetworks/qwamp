@@ -91,7 +91,7 @@ namespace Autobahn {
 
       bool ready;
       QVariant result;
-      std::exception ex;
+      QString ex;
   };
 
   /**
@@ -226,7 +226,7 @@ namespace Autobahn {
 
     private:
 
-      QVariant makeCall(const QString& procedure, std::function<void()> paramCallback = 0);
+      QVariant makeCall(const QString& procedure, int aditionalParamCount, std::function<void()> paramCallback = 0);
 
       /// Map of outstanding WAMP calls (request ID -> call).
       typedef QMap<uint64_t, CallRequest> CallRequests;

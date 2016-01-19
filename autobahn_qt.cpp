@@ -271,7 +271,7 @@ namespace Autobahn {
     }
   }
 
-  QVariant Session::makeCall(const QString& procedure, std::function<void()> paramCallback) {
+  QVariant Session::makeCall(const QString& procedure, int aditionalParamCount, std::function<void()> paramCallback) {
 
     if (!m_session_id) {
       throw no_session_error();
@@ -282,7 +282,7 @@ namespace Autobahn {
 
     // [CALL, Request|id, Options|dict, Procedure|uri]
 
-    m_packer.pack_array(4);
+    m_packer.pack_array(4 + aditionalParamCount);
     m_packer.pack(static_cast<int> (msg_code::CALL));
     m_packer.pack(m_request_id);
     m_packer.pack_map(0);
@@ -294,10 +294,27 @@ namespace Autobahn {
 
     CallRequest &callRequest = callRequestsIterator.value();
     while (true){
-      m_in.waitForReadyRead(30000);  //TODO handle timout as exception
-      QCoreApplication::processEvents(); //to call readData by signal
+      if (!m_in.waitForReadyRead(30000)) {  //TODO handle timout as exception
+        QVariantMap resultMap;
+        QVariantMap exception;
+        exception["what"] = "error ocured during waiting for call response";
+        resultMap["exception"] = exception;
+        return resultMap;
+      }
+      readData();
+//      QCoreApplication::processEvents(); //to call readData by signal
       if (callRequest.ready) {           //add exception handling
-        QVariant result = callRequest.result;
+        QVariant result;
+        if (!callRequest.ex.isEmpty()) {
+          QVariantMap resultMap;
+          QVariantMap exception;
+          exception["what"] = callRequest.ex;
+          resultMap["exception"] = exception;
+          result = resultMap;
+        }
+        else {
+          result = callRequest.result;
+        }
         callRequests.erase(callRequestsIterator);
         return result;
       }
@@ -305,14 +322,14 @@ namespace Autobahn {
   }
 
   QVariant Session::call(const QString& procedure) {
-    return makeCall(procedure);
+    return makeCall(procedure, 0);
   }
 
 
   QVariant Session::call(const QString& procedure, const QVariantList& args) {
 
     if (args.count() > 0) {
-      return makeCall(procedure, [&]() {
+      return makeCall(procedure, 1, [&]() {
         packQVariant(args);
       });
     }
@@ -325,7 +342,7 @@ namespace Autobahn {
   QVariant Session::call(const QString& procedure, const QVariantList& args, const QVariantMap& kwargs) {
 
     if (kwargs.count() > 0) {
-      return makeCall(procedure, [&]() {
+      return makeCall(procedure, 2, [&]() {
         packQVariant(args);
         packQVariant(kwargs);
       });
@@ -603,7 +620,7 @@ namespace Autobahn {
             // FIXME: forward all error info .. also not sure if this is the correct
             // way to use set_exception()
             callIterator.value().ready = true;
-            callIterator.value().ex = std::runtime_error(error);
+            callIterator.value().ex = QString::fromStdString(error);
           }
           else {
             throw protocol_error("bogus ERROR message for non-pending CALL request ID");
