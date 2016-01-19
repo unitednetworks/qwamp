@@ -39,12 +39,17 @@ namespace Autobahn {
       m_in(in),
       m_out(out),
       mIsJoined(false),
+      m_msg_read(0),
       m_packer(&m_buffer),
       m_session_id(0),
       m_request_id(0),
       m_goodbye_sent(false),
       state(Initial) {
     connect(&m_in, &QIODevice::readyRead, this, &Autobahn::Session::readData);
+    connect(&m_in, &QIODevice::readChannelFinished, [this]() {
+      m_stopped = true;
+      state = Initial;
+    });
   }
 
   void Session::start() {
@@ -63,8 +68,14 @@ namespace Autobahn {
       if (state == Initial) {
         get_handshake_reply();
       }
+      else if (state == Started) {
+        get_msg_header();
+      }
       else {
-        get_message();
+        get_msg_body();
+      }
+      if (m_stopped) {
+        break;
       }
     }
   }
@@ -433,7 +444,7 @@ namespace Autobahn {
     emit left(QString::fromStdString(reason));
     m_goodbye_sent = false;
     mIsJoined = false;
-  }
+ }
 
 
   void Session::leave(const QString &reason) {
@@ -680,7 +691,6 @@ namespace Autobahn {
         else {
           QFutureWatcher<QVariant> *watcher = new QFutureWatcher<QVariant>();
           QFuture<QVariant> future = QtConcurrent::run(endpoint.function, args, kwargs);
-          watcher->setFuture(future);
           QObject::connect(watcher, &QFutureWatcher<QVariant>::finished, [this, request_id, watcher, future] {
             QVariant res = future.result();
             m_packer.pack_array(4);
@@ -692,6 +702,7 @@ namespace Autobahn {
             send();
             watcher->deleteLater();
           });
+          watcher->setFuture(future);
         }
       }
 
@@ -934,11 +945,6 @@ namespace Autobahn {
    }
 
 
-  void Session::get_message() {
-    get_msg_header();
-    get_msg_body();
-  }
-
   void Session::get_msg_header() {
     m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
 
@@ -952,19 +958,21 @@ namespace Autobahn {
 
     // read actual message
     m_unpacker.reserve_buffer(m_msg_len);
+    m_msg_read = 0;
+    state = ReadingMessage;
   }
 
 
   void Session::get_msg_body() {
     char *buf = m_unpacker.buffer();
-    qint64 read = 0;
-    while (read < m_msg_len) {
-      m_in.waitForReadyRead(100);
-      read += m_in.read(&buf[read], m_msg_len - read);
+    m_msg_read += m_in.read(&buf[m_msg_read], m_msg_len - m_msg_read);
+    if (m_msg_read < m_msg_len) {
+      return;
     }
     if (m_debug) {
       qDebug() << "RX message received.";
     }
+    state = Started;
 
     m_unpacker.buffer_consumed(m_msg_len);
 
@@ -1010,6 +1018,7 @@ namespace Autobahn {
         break;
 
       case msg_code::ABORT:
+        qDebug() << "ABORT";
         // FIXME
         break;
 

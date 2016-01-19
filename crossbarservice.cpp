@@ -44,11 +44,19 @@ void CrossbarService::registerBasicParamConverters() {
 }
 
 void CrossbarService::qTimeParamConverter(QTime &time, const QVariant &v) {
-  if (v.canConvert(QMetaType::QString)) {
-    time = QTime::fromString(v.toString(), "HH:mm");
+  if (v.isNull()) {
+    time = QTime();
   }
-  if (!time.isValid()) {
-    throw std::runtime_error("Invalid conversion to QTime");
+  else {
+    if (v.canConvert(QMetaType::QString)) {
+      time = QTime::fromString(v.toString(), "HH:mm");
+      if (!time.isValid()) {
+        throw std::runtime_error("Invalid conversion to QTime");
+      }
+    }
+    else {
+      throw std::runtime_error("Bad qtime parameter");
+    }
   }
 }
 

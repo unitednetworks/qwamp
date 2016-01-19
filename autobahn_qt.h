@@ -153,31 +153,6 @@ namespace Autobahn {
 
 
       /**
-       * Publish an event with empty payload to a topic.
-       *
-       * @param topic The URI of the topic to publish to.
-       */
-      void publish(const QString &topic);
-
-      /**
-       * Publish an event with positional payload to a topic.
-       *
-       * @param topic The URI of the topic to publish to.
-       * @param args The positional payload for the event.
-       */
-      void publish(const QString &topic, const QVariantList &args);
-
-      /**
-       * Publish an event with both positional and keyword payload to a topic.
-       *
-       * @param topic The URI of the topic to publish to.
-       * @param args The positional payload for the event.
-       * @param kwargs The keyword payload for the event.
-       */
-      void publish(const QString& topic, const QVariantList &args, const QVariantMap &kwargs);
-
-
-      /**
        * Subscribe a handler to a topic to receive events.
        *
        * @param topic The URI of the topic to subscribe to.
@@ -223,6 +198,31 @@ namespace Autobahn {
        * @param options Options when registering a procedure.
        */
       void provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType = Endpoint::Sync, const QVariantMap& options = QVariantMap());
+
+    public Q_SLOTS:
+      /**
+       * Publish an event with empty payload to a topic.
+       *
+       * @param topic The URI of the topic to publish to.
+       */
+      void publish(const QString &topic);
+
+      /**
+       * Publish an event with positional payload to a topic.
+       *
+       * @param topic The URI of the topic to publish to.
+       * @param args The positional payload for the event.
+       */
+      void publish(const QString &topic, const QVariantList &args);
+
+      /**
+       * Publish an event with both positional and keyword payload to a topic.
+       *
+       * @param topic The URI of the topic to publish to.
+       * @param args The positional payload for the event.
+       * @param kwargs The keyword payload for the event.
+       */
+      void publish(const QString& topic, const QVariantList &args, const QVariantMap &kwargs);
 
     private:
 
@@ -305,7 +305,6 @@ namespace Autobahn {
       void send();
 
       void get_handshake_reply();
-      void get_message();
       void get_msg_header();
       void get_msg_body();
 
@@ -324,6 +323,7 @@ namespace Autobahn {
       bool mIsJoined;
       char m_buffer_msg_len[4];
       uint32_t m_msg_len;
+      uint32_t m_msg_read;
 
       /// MsgPack serialization buffer.
       msgpack::sbuffer m_buffer;
@@ -344,7 +344,8 @@ namespace Autobahn {
 
       enum State {
         Initial,
-        Started
+        Started,
+        ReadingMessage
       };
 
       State state;
