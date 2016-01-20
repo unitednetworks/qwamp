@@ -52,6 +52,29 @@ namespace Autobahn {
     });
   }
 
+  Session::Session(QIODevice &inout, bool debug_calls, bool debug) : Session(inout, inout, debug_calls, debug)
+  {
+  }
+
+  Session::Session(const QString &name, QIODevice &in, QIODevice &out, bool debug_calls, bool debug) : Session(in, out, debug_calls, debug)
+  {
+    m_name = name;
+  }
+
+  Session::Session(const QString &name, QIODevice &inout, bool debug_calls, bool debug) : Session(name, inout, inout, debug_calls, debug)
+  {
+  }
+
+  const QString &Session::name() const
+  {
+    return m_name;
+  }
+
+  void Session::setName(const QString &name)
+  {
+    m_name = name;
+  }
+
   void Session::start() {
     // Send the initial handshake packet informing the server which
     // serialization format we wish to use, and our maximum message size
@@ -173,11 +196,12 @@ namespace Autobahn {
 
      m_request_id += 1;
      Endpoint endpoint;
+     QString procedureName = makeName(procedure);
      if (m_debug_calls) {
-       Endpoint::Function wrappedEndpointFunction = [endpointFunction, procedure](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
+       Endpoint::Function wrappedEndpointFunction = [endpointFunction, procedureName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
          QTime timer;
          timer.start();
-         qDebug() << "Called" << procedure << "with" << args;
+         qDebug() << "Called" << procedureName << "with" << args;
          QVariant result = endpointFunction(args, kwargs);
          qDebug() << "execution elapsed" << timer.elapsed() << "ms";
          return result;
@@ -188,7 +212,7 @@ namespace Autobahn {
        endpoint = { endpointFunction, endpointType };
      }
 
-     registerRequests.insert(m_request_id, RegisterRequest(procedure, endpoint));
+     registerRequests.insert(m_request_id, RegisterRequest(procedureName, endpoint));
 
      // [REGISTER, Request|id, Options|dict, Procedure|uri]
 
@@ -197,12 +221,12 @@ namespace Autobahn {
      m_packer.pack(m_request_id);
      //m_packer.pack_map(0);
      packQVariant(options);
-     m_packer.pack(procedure.toStdString());
+     m_packer.pack(procedureName.toStdString());
      send();
   }
 
 
-  void Session::publish(const QString& topic) {
+  void Session::publish(const QString &topic) {
 
     if (!m_session_id) {
       throw no_session_error();
@@ -216,7 +240,7 @@ namespace Autobahn {
     m_packer.pack(static_cast<int> (msg_code::PUBLISH));
     m_packer.pack(m_request_id);
     m_packer.pack_map(0);
-    m_packer.pack(topic.toStdString());
+    m_packer.pack(makeName(topic).toStdString());
     send();
   }
 
@@ -236,7 +260,7 @@ namespace Autobahn {
       m_packer.pack(static_cast<int> (msg_code::PUBLISH));
       m_packer.pack(m_request_id);
       m_packer.pack_map(0);
-      m_packer.pack(topic.toStdString());
+      m_packer.pack(makeName(topic).toStdString());
       packQVariant(args);
       send();
     }
@@ -261,7 +285,7 @@ namespace Autobahn {
       m_packer.pack(static_cast<int> (msg_code::PUBLISH));
       m_packer.pack(m_request_id);
       m_packer.pack_map(0);
-      m_packer.pack(topic.toStdString());
+      m_packer.pack(makeName(topic).toStdString());
       packQVariant(args);
       packQVariant(kwargs);
       send();
@@ -269,6 +293,15 @@ namespace Autobahn {
     else {
       publish(topic, args);
     }
+  }
+
+  QString Session::makeName(const QString &name) const
+  {
+    QString n = m_name;
+    if (!n.isEmpty()) {
+      n += QStringLiteral(".");
+    }
+    return n + name;
   }
 
   QVariant Session::makeCall(const QString& procedure, int aditionalParamCount, std::function<void()> paramCallback) {

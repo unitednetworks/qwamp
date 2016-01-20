@@ -122,6 +122,45 @@ namespace Autobahn {
       Session(QIODevice &in, QIODevice &out, bool debug_calls = false, bool debug = false);
 
       /**
+       * Overloaded previous function with single in/out stream
+       *
+       * @param inout
+       * @param debug_calls
+       * @param debug
+       */
+      Session(QIODevice &inout, bool debug_calls = false, bool debug = false);
+
+      /**
+       * Create a new named WAMP session.
+       *
+       * @param in The input stream to run this session on.
+       * @param out The output stream to run this session on.
+       */
+      Session(const QString &name, QIODevice &in, QIODevice &out, bool debug_calls = false, bool debug = false);
+
+      /**
+       * Overloaded previous function with single in/out stream
+       *
+       * @param name
+       * @param inout
+       * @param debug_calls
+       * @param debug
+       */
+      Session(const QString &name, QIODevice &inout, bool debug_calls = false, bool debug = false);
+
+      /**
+       * Gets session name
+       * @return
+       */
+      const QString &name() const;
+
+      /**
+       * Sets the session name (it appears as a prefix in published methods)
+       * @param name - name of session
+       */
+      void setName(const QString &name);
+
+      /**
        * Start listening on the IStream provided to the constructor
        * of this session.
        */
@@ -223,6 +262,8 @@ namespace Autobahn {
        * @param kwargs The keyword payload for the event.
        */
       void publish(const QString& topic, const QVariantList &args, const QVariantMap &kwargs);
+
+      QString makeName(const QString &name) const;
 
     private:
 
@@ -341,6 +382,7 @@ namespace Autobahn {
       uint64_t m_request_id;
 
       bool m_goodbye_sent;
+      QString m_name;
 
       enum State {
         Initial,

@@ -13,7 +13,7 @@ class CrossbarService : public QObject {
     Q_OBJECT
 
   public:
-    CrossbarService();
+    CrossbarService(Autobahn::Endpoint::Type callType = Autobahn::Endpoint::Sync);
     ~CrossbarService();
 
     typedef std::function<QVariant(const QVariantList &, const QVariantMap &, Autobahn::Endpoint::Function)> EndpointWrapper;
@@ -140,6 +140,7 @@ class CrossbarService : public QObject {
 
     QMap<int, VoidParamConverter> paramConverters;
     QMap<int, VoidResultConverter> resultConverters;
+    Autobahn::Endpoint::Type callType;
 };
 
 #endif // CROSSBARSERVICE_H

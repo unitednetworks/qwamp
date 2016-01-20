@@ -13,7 +13,7 @@ QString CrossbarService::m_prefix;
 bool CrossbarService::m_addClassName = true;
 CrossbarService::EndpointWrapper CrossbarService::wrapper;
 
-CrossbarService::CrossbarService() {
+CrossbarService::CrossbarService(Autobahn::Endpoint::Type callType) : callType(callType) {
   if (!services) {
     services = new QList<CrossbarService*>;
   }
@@ -215,7 +215,7 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
       }
       nameParts << methodIterator.key();
       QString crossbarMethodName = nameParts.join(".");
-      qDebug() << "Registering" << crossbarMethodName << qPrintable(methodIterator.value().count() > 1 ? ("(" + QString::number(methodIterator.value().count()) + "x)") : QString());
+      qDebug() << "Registering" << session.makeName(crossbarMethodName) << qPrintable(methodIterator.value().count() > 1 ? ("(" + QString::number(methodIterator.value().count()) + "x)") : QString());
 
       struct Method {
           QMetaMethod metaMethod;
@@ -293,10 +293,10 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
       if (wrapper) {
         session.provide(crossbarMethodName, [endpoint] (const QVariantList &args, const QVariantMap &kwargs) {
           return wrapper(args, kwargs, endpoint);
-        });
+        }, service->callType);
       }
       else {
-        session.provide(crossbarMethodName, endpoint);
+        session.provide(crossbarMethodName, endpoint, service->callType);
       }
     }
 
