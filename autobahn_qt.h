@@ -243,6 +243,8 @@ namespace Autobahn {
        */
       void provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType = Endpoint::Sync, const QVariantMap& options = QVariantMap());
 
+      const QHash<QString, CallStatistics> &callStatistics() const { return m_callStatistics; }
+
     public Q_SLOTS:
       /**
        * Publish an event with empty payload to a topic.
@@ -388,7 +390,7 @@ namespace Autobahn {
 
       bool m_goodbye_sent;
       QString m_name;
-      QHash<QString, CallStatistics> callStatistics;
+      QHash<QString, CallStatistics> m_callStatistics;
 
       enum State {
         Initial,

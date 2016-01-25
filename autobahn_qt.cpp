@@ -55,8 +55,8 @@ namespace Autobahn {
         int totalCalls = 0;
         int totalTime = 0;
         QVariantMap stl;
-        for (const QString &key : callStatistics.keys()) {
-          const CallStatistics &c = callStatistics[key];
+        for (const QString &key : m_callStatistics.keys()) {
+          const CallStatistics &c = m_callStatistics[key];
           totalCalls += c.callNumber;
           totalTime += c.callNumber * c.averageTime;
           QVariantMap m;
@@ -222,16 +222,16 @@ namespace Autobahn {
        Endpoint::Function wrappedEndpointFunction = [this, procedure, endpointFunction, procedureName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
          QTime timer;
          timer.start();
+         QByteArray argsJson = "(";
          if (args.count()) {
-           qDebug() << "Called" << qUtf8Printable(procedureName) << "with" << QJsonDocument::fromVariant(QVariant(args)).toJson(QJsonDocument::Compact).constData();
+           argsJson += QJsonDocument::fromVariant(QVariant(args)).toJson(QJsonDocument::Compact);
          }
-         else {
-           qDebug() << "Called" << qUtf8Printable(procedureName);
-         }
+         argsJson += ")";
+         qDebug() << "Called" << qUtf8Printable(procedureName) << argsJson.constData();
          QVariant result = endpointFunction(args, kwargs);
          int elapsed = timer.elapsed();
          qDebug() << "execution elapsed" << elapsed << "ms";
-         CallStatistics &cst = callStatistics[procedure];
+         CallStatistics &cst = m_callStatistics[procedure];
          int tm = cst.callNumber * cst.averageTime + elapsed;
          ++cst.callNumber;
          cst.averageTime = tm / cst.callNumber;
