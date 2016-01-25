@@ -9,6 +9,52 @@
 #include "autobahn_qt.h"
 #include <qvariantmapper.h>
 
+template<class T>
+void enumConverter(T &t, const QVariant &v) {
+  if (v.type() != QVariant::String && v.type() != QVariant::Int && v.type() != QVariant::UInt && v.type() != QVariant::ULongLong) {
+    throw std::runtime_error("Enum argument must be passed as string or int");
+  }
+  QMetaEnum enumerator = QMetaEnum::fromType<T>();
+  int val;
+  if (v.type() == QVariant::String) {
+    QString vs = v.toString();
+    if (vs.isEmpty()) {
+      throw std::runtime_error("String enum argument must not be empty");
+    }
+    val = enumerator.keyToValue(vs.toUtf8().constData());
+    if (val == -1) {
+      throw std::runtime_error("illegal enum value " + vs.toStdString() + " in enum " + enumerator.scope() + "::" + enumerator.name());
+    }
+  }
+  else {
+    val = v.toInt();
+    if (!enumerator.valueToKey(val)) {
+      throw std::runtime_error("illegal enum value " + QString::number(val).toStdString() + " in enum " + enumerator.scope() + "::" + enumerator.name());
+    }
+  }
+  t = T(val);
+}
+
+//template<class T>
+//void registerEnumConverter() {
+
+//  QMetaType::registerConverter<QVariant, T>([](const QVariant &v) {
+//    return convertToEnum<T>(v);
+//  });
+
+//  QMetaType::registerConverter<QVariant, QList<T>>([convertToEnum](const QVariant &v) {
+//    QList<T> enums;
+//    if (v.type() != QVariant::List) {
+//      throw std::runtime_error("array enum argument must be passed as list");
+//    }
+//    QVariantList l = v.toList();
+//    for (const QVariant &lv : l) {
+//      enums.append(convertToEnum<T>(lv));
+//    }
+//    return enums;
+//  });
+//}
+
 class CrossbarService : public QObject {
     Q_OBJECT
 
@@ -37,21 +83,22 @@ class CrossbarService : public QObject {
 
     template<class T>
     void registerParamConverter(ParamConverter<T> converter) {
-      paramConverters[qMetaTypeId<T>()] = [=](void *v, const QVariant &arg) {
-        T *t = (T *)v;
-        converter(*t, arg);
-      };
-      paramConverters[qMetaTypeId<QList<T>>()]  = [=](void *v, const QVariant &args) {
-        if (args.type() != QVariant::List) {
-          throw std::runtime_error("list converter accepts only list argument");
-        }
-        QList<T> *listT = (QList<T> *)v;
-        for (const QVariant &arg : args.toList()) {
-          T t;
-          converter(t, arg);
-          listT->append(t);
-        }
-      };
+      this->registerParamConverter(converter, paramConverters);
+    }
+
+    template<class T>
+    static void registerStaticParamConverter(ParamConverter<T> converter) {
+      registerParamConverter(converter, staticParamConverters);
+    }
+
+    template<class T>
+    void registerEnumConverter() {
+      registerParamConverter(ParamConverter<T>(enumConverter<T>));
+    }
+
+    template<class T>
+    static void registerStaticEnumConverter() {
+      registerStaticParamConverter(ParamConverter<T>(enumConverter<T>));
     }
 
     template<class T>
@@ -74,8 +121,8 @@ class CrossbarService : public QObject {
 
     template<class T>
     void registerMapper(const QVariantClassMapper<T> *mapper) {
-//      int type = qRegisterMetaType<T>();
-//      int listType = qRegisterMetaType<QList<T>>();
+//      qRegisterMetaType<T>();
+//      qRegisterMetaType<QList<T>>();
 //      int type = qMetaTypeId<T>();
 //      int listType = qMetaTypeId<QList<T>>();
       registerParamConverter<T>([mapper](T &t, const QVariant &v) {
@@ -91,6 +138,25 @@ class CrossbarService : public QObject {
 
   protected:
     void registerBasicParamConverters();
+
+    template<class T>
+    static void registerParamConverter(ParamConverter<T> converter, QMap<int, VoidParamConverter> &paramConverters) {
+      paramConverters[qMetaTypeId<T>()] = [=](void *v, const QVariant &arg) {
+        T *t = (T *)v;
+        converter(*t, arg);
+      };
+      paramConverters[qMetaTypeId<QList<T>>()]  = [=](void *v, const QVariant &args) {
+        if (args.type() != QVariant::List) {
+          throw std::runtime_error("list converter accepts only list argument");
+        }
+        QList<T> *listT = (QList<T> *)v;
+        for (const QVariant &arg : args.toList()) {
+          T t;
+          converter(t, arg);
+          listT->append(t);
+        }
+      };
+    }
 
     template<typename T>
     void registerSimpleParamConverter(T (QVariant::*toT)() const) {
@@ -140,7 +206,28 @@ class CrossbarService : public QObject {
 
     QMap<int, VoidParamConverter> paramConverters;
     QMap<int, VoidResultConverter> resultConverters;
+    static QMap<int, VoidParamConverter> staticParamConverters;
+    static QMap<int, VoidResultConverter> staticResultConverters;
+
     Autobahn::Endpoint::Type callType;
 };
+
+template<typename T>
+class CrossbarEnumRegistrator {
+};
+
+#define CROSSBAR_ENUM(TYPE) CROSSBAR_ENUM_IMPL(TYPE)
+#define CROSSBAR_ENUM_IMPL(TYPE)   \
+  template<> \
+  class CrossbarEnumRegistrator<TYPE> { \
+    public:                                                        \
+      CrossbarEnumRegistrator() {                                  \
+        CrossbarService::registerStaticEnumConverter<TYPE>();      \
+      }                                                            \
+      static CrossbarEnumRegistrator<TYPE> registrator;            \
+  };                                                               \
+                                                                   \
+CrossbarEnumRegistrator<TYPE> CrossbarEnumRegistrator<TYPE>::registrator;
+
 
 #endif // CROSSBARSERVICE_H

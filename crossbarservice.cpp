@@ -12,6 +12,8 @@ QList<CrossbarService*> *CrossbarService::services = 0;
 QString CrossbarService::m_prefix;
 bool CrossbarService::m_addClassName = true;
 CrossbarService::EndpointWrapper CrossbarService::wrapper;
+QMap<int, CrossbarService::VoidParamConverter> CrossbarService::staticParamConverters;
+QMap<int, CrossbarService::VoidResultConverter> CrossbarService::staticResultConverters;
 
 CrossbarService::CrossbarService(Autobahn::Endpoint::Type callType) : callType(callType) {
   if (!services) {
@@ -70,8 +72,19 @@ void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &d
 
 CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaMethod &metaMethod, int i) const {
   int parameterType = metaMethod.parameterType(i);
-//  qDebug() << metaMethod.parameterTypes()[i] << parameterType;
-  if (QMetaType::typeFlags(parameterType) & QMetaType::IsEnumeration) {
+
+  if (paramConverters.contains(parameterType)) {
+    return paramConverters[parameterType];
+  }
+  else if (staticParamConverters.contains(parameterType)) {
+    return staticParamConverters[parameterType];
+  }
+  else if (QMetaType::hasRegisteredConverterFunction(qMetaTypeId<QVariant>(), parameterType)){
+    return [parameterType](void *v, const QVariant &arg) {
+      QMetaType::convert(&arg, qMetaTypeId<QVariant>(), v, parameterType);
+    };
+  }
+  else if (QMetaType::typeFlags(parameterType) & QMetaType::IsEnumeration) {
     const QMetaObject *mo = QMetaType::metaObjectForType(parameterType);
     QString pt = metaMethod.parameterTypes()[i];
     pt = pt.mid(pt.lastIndexOf(':') + 1);
@@ -90,6 +103,10 @@ CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaM
         if (vs.isEmpty()) {
           throw std::runtime_error("String enum argument must not be empty");
         }
+        int val = enumerator.keyToValue(vs.toUtf8().constData());
+        if (val == -1) {
+          throw std::runtime_error("illegal enum value " + vs.toStdString() + " in enum " + enumerator.scope() + "::" + enumerator.name());
+        }
         *enumValue = enumerator.keyToValue(vs.toUtf8().constData());
       }
       else {
@@ -98,17 +115,7 @@ CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaM
     };
   }
   else {
-    if (paramConverters.contains(parameterType)) {
-      return paramConverters[parameterType];
-    }
-    else if (QMetaType::hasRegisteredConverterFunction(qMetaTypeId<QVariant>(), parameterType)){
-      return [parameterType](void *v, const QVariant &arg) {
-        QMetaType::convert(&arg, qMetaTypeId<QVariant>(), v, parameterType);
-      };
-    }
-    else {
-      return 0;
-    }
+    return 0;
   }
 }
 

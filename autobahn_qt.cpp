@@ -457,7 +457,7 @@ namespace Autobahn {
       m_packer.pack(val);
     }
     else {
-      qDebug() << "Warning: don't know how to pack type" << value.typeName();
+      qDebug() << "Warning: don't know how to pack type" << value.typeName() << value.type();
     }
   }
 
