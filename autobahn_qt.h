@@ -42,6 +42,11 @@ class QIODevice;
  */
 namespace Autobahn {
 
+  struct CallStatistics {
+      int callNumber = 0;
+      int averageTime = 0;
+  };
+
   /// Handler type for use with nn::subscribe(const QString&, Handler)
   typedef std::function<void(const QVariantList&, const QVariantMap&)> Handler;
 
@@ -383,6 +388,7 @@ namespace Autobahn {
 
       bool m_goodbye_sent;
       QString m_name;
+      QHash<QString, CallStatistics> callStatistics;
 
       enum State {
         Initial,

@@ -50,6 +50,27 @@ namespace Autobahn {
       m_stopped = true;
       state = Initial;
     });
+    connect(this, &Session::joined, [this]() {
+      provide("api.getStatistics", [this](const QVariantList &args, const QVariantMap &kwargs) {
+        int totalCalls = 0;
+        int totalTime = 0;
+        QVariantMap stl;
+        for (const QString &key : callStatistics.keys()) {
+          const CallStatistics &c = callStatistics[key];
+          totalCalls += c.callNumber;
+          totalTime += c.callNumber * c.averageTime;
+          QVariantMap m;
+          m["calls"] = c.callNumber;
+          m["averageTime"] = c.averageTime;
+          stl[key] = m;
+        }
+        QVariantMap st;
+        st["procedures"] = stl;
+        st["totalCalls"] = totalCalls;
+        st["totalAverage"] = totalTime / totalCalls;
+        return st;
+      });
+    });
   }
 
   Session::Session(QIODevice &inout, bool debug_calls, bool debug) : Session(inout, inout, debug_calls, debug)
@@ -198,12 +219,22 @@ namespace Autobahn {
      Endpoint endpoint;
      QString procedureName = makeName(procedure);
      if (m_debug_calls) {
-       Endpoint::Function wrappedEndpointFunction = [endpointFunction, procedureName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
+       Endpoint::Function wrappedEndpointFunction = [this, procedure, endpointFunction, procedureName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
          QTime timer;
          timer.start();
-         qDebug() << "Called" << procedureName << "with" << args;
+         if (args.count()) {
+           qDebug() << "Called" << qUtf8Printable(procedureName) << "with" << QJsonDocument::fromVariant(QVariant(args)).toJson(QJsonDocument::Compact).constData();
+         }
+         else {
+           qDebug() << "Called" << qUtf8Printable(procedureName);
+         }
          QVariant result = endpointFunction(args, kwargs);
-         qDebug() << "execution elapsed" << timer.elapsed() << "ms";
+         int elapsed = timer.elapsed();
+         qDebug() << "execution elapsed" << elapsed << "ms";
+         CallStatistics &cst = callStatistics[procedure];
+         int tm = cst.callNumber * cst.averageTime + elapsed;
+         ++cst.callNumber;
+         cst.averageTime = tm / cst.callNumber;
          return result;
        };
        endpoint = { wrappedEndpointFunction, endpointType };
