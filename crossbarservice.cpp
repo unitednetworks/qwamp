@@ -11,7 +11,7 @@
 QList<CrossbarService*> *CrossbarService::services = 0;
 QString CrossbarService::m_prefix;
 bool CrossbarService::m_addClassName = true;
-CrossbarService::EndpointWrapper CrossbarService::wrapper;
+CrossbarService::EndpointWrapper CrossbarService::commonWrapper;
 QMap<int, CrossbarService::VoidParamConverter> CrossbarService::staticParamConverters;
 QMap<int, CrossbarService::VoidResultConverter> CrossbarService::staticResultConverters;
 
@@ -68,6 +68,10 @@ void CrossbarService::qTimeResultConverter(QVariant &res, const QTime &time) {
 
 void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &dateTime) {
   res = QVariant(dateTime.toString(Qt::DateFormat::ISODate));
+}
+
+void CrossbarService::addWrapper(CrossbarService::EndpointWrapper wrapper) {
+  wrappers.append(wrapper);
 }
 
 CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaMethod &metaMethod, int i) const {
@@ -297,14 +301,28 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
         return convertResult(result, returnType, resultConverter);
       };
 
-      if (wrapper) {
-        session.provide(crossbarMethodName, [endpoint] (const QVariantList &args, const QVariantMap &kwargs) {
-          return wrapper(args, kwargs, endpoint);
-        }, service->callType);
+      Autobahn::Endpoint::Function wrappedEndpoint = endpoint;
+      for (EndpointWrapper wrapper : service->wrappers) {
+        Autobahn::Endpoint::Function innerEndpoint = wrappedEndpoint;
+        wrappedEndpoint = [wrapper, innerEndpoint] (const QVariantList &args, const QVariantMap &kwargs) {
+          return wrapper(args, kwargs, innerEndpoint);
+        };
       }
-      else {
-        session.provide(crossbarMethodName, endpoint, service->callType);
+      if (commonWrapper) {
+        Autobahn::Endpoint::Function innerEndpoint = wrappedEndpoint;
+        wrappedEndpoint = [innerEndpoint] (const QVariantList &args, const QVariantMap &kwargs) {
+          return commonWrapper(args, kwargs, innerEndpoint);
+        };
       }
+      session.provide(crossbarMethodName, wrappedEndpoint, service->callType);
+//      if (staticWrapper) {
+//        session.provide(crossbarMethodName, [endpoint] (const QVariantList &args, const QVariantMap &kwargs) {
+//          return staticWrapper(args, kwargs, endpoint);
+//        }, service->callType);
+//      }
+//      else {
+//        session.provide(crossbarMethodName, endpoint, service->callType);
+//      }
     }
 
 //    for (int methodOffset = metaObject->methodOffset(); methodOffset < metaObject->methodCount(); ++methodOffset) {

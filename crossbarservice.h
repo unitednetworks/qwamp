@@ -78,7 +78,7 @@ class CrossbarService : public QObject {
 
     static inline const QString &getPrefix() { return m_prefix; }
     static void setPrefix(const QString &s);
-    static inline void setWrapper(EndpointWrapper w) { wrapper = w; }
+    static inline void setCommonWrapper(EndpointWrapper w) { commonWrapper = w; }
     static inline void setAddClassName(bool b)       { m_addClassName = b; }
 
     template<class T>
@@ -184,6 +184,8 @@ class CrossbarService : public QObject {
 
     QString apiClassName;
 
+    void addWrapper(EndpointWrapper wrapper);
+
   private:
     struct Cleaner {
       typedef std::function<void()> CleanerFunction;
@@ -202,12 +204,13 @@ class CrossbarService : public QObject {
     static QList<CrossbarService*> *services;
     static QString m_prefix;
     static bool m_addClassName;
-    static EndpointWrapper wrapper;
+    static EndpointWrapper commonWrapper;
 
     QMap<int, VoidParamConverter> paramConverters;
     QMap<int, VoidResultConverter> resultConverters;
     static QMap<int, VoidParamConverter> staticParamConverters;
     static QMap<int, VoidResultConverter> staticResultConverters;
+    QList<EndpointWrapper> wrappers;
 
     Autobahn::Endpoint::Type callType;
 };
