@@ -20,6 +20,7 @@
 ///////////////////////////////////////////////////////////////////////////////
 
 #include <QMetaMethod>
+#include <QTime>
 #include <QVariant>
 
 #include <vector>
@@ -58,6 +59,8 @@ namespace Autobahn {
     Function function;
     Type type;
   };
+
+  typedef std::function<QVariant(const QVariantList &, const QVariantMap &, Autobahn::Endpoint::Function)> EndpointWrapper;
 
   /// Represents a procedure registration.
   struct Registration {
@@ -271,6 +274,7 @@ namespace Autobahn {
       void publish(const QString& topic, const QVariantList &args, const QVariantMap &kwargs);
 
       QString makeName(const QString &name) const;
+      inline void setEndpointWrapper(EndpointWrapper w) { endpointWrapper = w; }
 
     private:
 
@@ -391,6 +395,7 @@ namespace Autobahn {
       bool m_goodbye_sent;
       QString m_name;
       QHash<QString, CallStatistics> m_callStatistics;
+      EndpointWrapper endpointWrapper;
 
       enum State {
         Initial,

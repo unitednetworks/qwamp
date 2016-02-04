@@ -59,10 +59,7 @@ class CrossbarService : public QObject {
     Q_OBJECT
 
   public:
-    CrossbarService(Autobahn::Endpoint::Type callType = Autobahn::Endpoint::Sync);
     ~CrossbarService();
-
-    typedef std::function<QVariant(const QVariantList &, const QVariantMap &, Autobahn::Endpoint::Function)> EndpointWrapper;
 
     template<class T>
     using ParamConverter = std::function<void(T &, const QVariant &)>;
@@ -78,7 +75,7 @@ class CrossbarService : public QObject {
 
     static inline const QString &getPrefix() { return m_prefix; }
     static void setPrefix(const QString &s);
-    static inline void setCommonWrapper(EndpointWrapper w) { commonWrapper = w; }
+    static inline void setCommonWrapper(Autobahn::EndpointWrapper w) { commonWrapper = w; }
     static inline void setAddClassName(bool b)       { m_addClassName = b; }
 
     template<class T>
@@ -137,6 +134,7 @@ class CrossbarService : public QObject {
     }
 
   protected:
+    CrossbarService(Autobahn::Endpoint::Type callType = Autobahn::Endpoint::Sync);
     void registerBasicParamConverters();
 
     template<class T>
@@ -184,7 +182,7 @@ class CrossbarService : public QObject {
 
     QString apiClassName;
 
-    void addWrapper(EndpointWrapper wrapper);
+    void addWrapper(Autobahn::EndpointWrapper wrapper);
 
   private:
     struct Cleaner {
@@ -204,13 +202,13 @@ class CrossbarService : public QObject {
     static QList<CrossbarService*> *services;
     static QString m_prefix;
     static bool m_addClassName;
-    static EndpointWrapper commonWrapper;
+    static Autobahn::EndpointWrapper commonWrapper;
 
     QMap<int, VoidParamConverter> paramConverters;
     QMap<int, VoidResultConverter> resultConverters;
     static QMap<int, VoidParamConverter> staticParamConverters;
     static QMap<int, VoidResultConverter> staticResultConverters;
-    QList<EndpointWrapper> wrappers;
+    QList<Autobahn::EndpointWrapper> wrappers;
 
     Autobahn::Endpoint::Type callType;
 };

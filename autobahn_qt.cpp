@@ -343,7 +343,6 @@ namespace Autobahn {
 
     m_request_id += 1;
     CallRequests::iterator callRequestsIterator = callRequests.insert(m_request_id, CallRequest());
-
     // [CALL, Request|id, Options|dict, Procedure|uri]
 
     m_packer.pack_array(4 + aditionalParamCount);
@@ -549,6 +548,7 @@ namespace Autobahn {
 
   QVariantList Session::unpackMsg(std::vector<msgpack::object> &v) {
     QList<QVariant> list;
+    list.reserve(v.size());
     for (msgpack::object &o : v) {
       list.append(unpackMsg(o));
     }
@@ -558,7 +558,7 @@ namespace Autobahn {
   QVariantMap Session::unpackMsg(std::map<std::string, msgpack::object> &m) {
     QVariantMap map;
     for (auto &in : m) {
-      map[QString::fromStdString(in.first)] = unpackMsg(in.second);
+      map.insert(QString::fromStdString(in.first), unpackMsg(in.second));
     }
     return map;
   }
@@ -733,6 +733,15 @@ namespace Autobahn {
       QVariantList args;
       QVariantMap kwargs;
 
+      Endpoint::Function endpointFunction;
+      if (endpointWrapper) {
+        endpointFunction = [this, endpoint](const QVariantList &args, const QVariantMap &kwargs) {
+          return endpointWrapper(args, kwargs, endpoint.function);
+        };
+      }
+      else {
+        endpointFunction = endpoint.function;
+      }
       if (msg.size() > 4) {
 
         if (msg[4].type != msgpack::type::ARRAY) {
@@ -760,7 +769,7 @@ namespace Autobahn {
         }
 
         if (endpoint.type == Endpoint::Sync) {
-          QVariant res = endpoint.function(args, kwargs);
+          QVariant res = endpointFunction(args, kwargs);
           m_packer.pack_array(4);
           m_packer.pack(static_cast<int> (msg_code::YIELD));
           m_packer.pack(request_id);
@@ -771,7 +780,7 @@ namespace Autobahn {
         }
         else {
           QFutureWatcher<QVariant> *watcher = new QFutureWatcher<QVariant>();
-          QFuture<QVariant> future = QtConcurrent::run(endpoint.function, args, kwargs);
+          QFuture<QVariant> future = QtConcurrent::run(endpointFunction, args, kwargs);
           QObject::connect(watcher, &QFutureWatcher<QVariant>::finished, [this, request_id, watcher, future] {
             QVariant res = future.result();
             m_packer.pack_array(4);

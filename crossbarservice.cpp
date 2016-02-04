@@ -11,7 +11,7 @@
 QList<CrossbarService*> *CrossbarService::services = 0;
 QString CrossbarService::m_prefix;
 bool CrossbarService::m_addClassName = true;
-CrossbarService::EndpointWrapper CrossbarService::commonWrapper;
+Autobahn::EndpointWrapper CrossbarService::commonWrapper;
 QMap<int, CrossbarService::VoidParamConverter> CrossbarService::staticParamConverters;
 QMap<int, CrossbarService::VoidResultConverter> CrossbarService::staticResultConverters;
 
@@ -37,6 +37,7 @@ void CrossbarService::setPrefix(const QString &s) {
 
 void CrossbarService::registerBasicParamConverters() {
   registerSimpleParamConverter<QString>(&QVariant::toString);
+  registerSimpleParamConverter<QByteArray>(&QVariant::toByteArray);
   registerSimpleParamConverter<bool>(&QVariant::toBool);
   registerSimpleParamConverter<int>([](const QVariant &v) { return v.toInt(); });
   registerParamConverter<QTime>(qTimeParamConverter);
@@ -70,13 +71,12 @@ void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &d
   res = QVariant(dateTime.toString(Qt::DateFormat::ISODate));
 }
 
-void CrossbarService::addWrapper(CrossbarService::EndpointWrapper wrapper) {
+void CrossbarService::addWrapper(Autobahn::EndpointWrapper wrapper) {
   wrappers.append(wrapper);
 }
 
 CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaMethod &metaMethod, int i) const {
   int parameterType = metaMethod.parameterType(i);
-
   if (paramConverters.contains(parameterType)) {
     return paramConverters[parameterType];
   }
@@ -302,7 +302,7 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
       };
 
       Autobahn::Endpoint::Function wrappedEndpoint = endpoint;
-      for (EndpointWrapper wrapper : service->wrappers) {
+      for (Autobahn::EndpointWrapper wrapper : service->wrappers) {
         Autobahn::Endpoint::Function innerEndpoint = wrappedEndpoint;
         wrappedEndpoint = [wrapper, innerEndpoint] (const QVariantList &args, const QVariantMap &kwargs) {
           return wrapper(args, kwargs, innerEndpoint);
