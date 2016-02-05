@@ -117,13 +117,15 @@ namespace Autobahn {
 
     public:
 
+      enum class Transport { Msgpack, Json };
+
       /**
        * Create a new WAMP session.
        *
        * @param in The input stream to run this session on.
        * @param out The output stream to run this session on.
        */
-      Session(QIODevice &in, QIODevice &out, bool debug_calls = false, bool debug = false);
+      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
@@ -132,7 +134,7 @@ namespace Autobahn {
        * @param debug_calls
        * @param debug
        */
-      Session(QIODevice &inout, bool debug_calls = false, bool debug = false);
+      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
 
       /**
        * Create a new named WAMP session.
@@ -140,7 +142,7 @@ namespace Autobahn {
        * @param in The input stream to run this session on.
        * @param out The output stream to run this session on.
        */
-      Session(const QString &name, QIODevice &in, QIODevice &out, bool debug_calls = false, bool debug = false);
+      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
@@ -150,7 +152,7 @@ namespace Autobahn {
        * @param debug_calls
        * @param debug
        */
-      Session(const QString &name, QIODevice &inout, bool debug_calls = false, bool debug = false);
+      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
 
       /**
        * Gets session name
@@ -342,6 +344,7 @@ namespace Autobahn {
       QString m_name;
       QHash<QString, CallStatistics> m_callStatistics;
       EndpointWrapper endpointWrapper;
+      Transport mTransport;
 
       enum State {
         Initial,

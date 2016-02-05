@@ -35,7 +35,7 @@
 
 namespace Autobahn {
 
-  Session::Session(QIODevice &in, QIODevice &out, bool debug_calls, bool debug)
+  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls, bool debug)
     : QObject(0),
       m_debug_calls(debug_calls),
       m_debug(debug),
@@ -47,6 +47,7 @@ namespace Autobahn {
       m_session_id(0),
       m_request_id(0),
       m_goodbye_sent(false),
+      mTransport(transport),
       state(Initial) {
     connect(&m_in, &QIODevice::readyRead, this, &Autobahn::Session::readData);
     connect(&m_in, &QIODevice::readChannelFinished, [this]() {
@@ -56,16 +57,16 @@ namespace Autobahn {
 //    MsgPack::registerType(QMetaType::QDateTime, 37);
   }
 
-  Session::Session(QIODevice &inout, bool debug_calls, bool debug) : Session(inout, inout, debug_calls, debug)
+  Session::Session(QIODevice &inout, Session::Transport transport, bool debug_calls, bool debug) : Session(inout, inout, transport, debug_calls, debug)
   {
   }
 
-  Session::Session(const QString &name, QIODevice &in, QIODevice &out, bool debug_calls, bool debug) : Session(in, out, debug_calls, debug)
+  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls, bool debug) : Session(in, out, transport, debug_calls, debug)
   {
     m_name = name;
   }
 
-  Session::Session(const QString &name, QIODevice &inout, bool debug_calls, bool debug) : Session(name, inout, inout, debug_calls, debug)
+  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug_calls, bool debug) : Session(name, inout, inout, transport, debug_calls, debug)
   {
   }
 
@@ -958,7 +959,17 @@ namespace Autobahn {
 
     QTime timer;
     timer.start();
-    QVariant nv = MsgPack::unpack(readBuffer);
+    QVariant nv;
+    if (mTransport == Transport::Msgpack) {
+      nv = MsgPack::unpack(readBuffer);
+    }
+    else {
+      QJsonParseError parseError;
+      nv = QJsonDocument::fromJson(readBuffer, &parseError).toVariant();
+      if (parseError.error != QJsonParseError::NoError) {
+        throw protocol_error(parseError.errorString().toStdString());
+      }
+    }
 //    qDebug() << QJsonDocument::fromVariant(nv).toJson();
 
     got_msg(nv);
@@ -1088,7 +1099,13 @@ namespace Autobahn {
 
   void Session::send(const QVariantList &message) {
     if (!m_stopped) {
-      QByteArray msg = MsgPack::pack(message);
+      QByteArray msg;
+      if (mTransport == Transport::Msgpack) {
+        msg = MsgPack::pack(message);
+      }
+      else {
+        msg = QJsonDocument::fromVariant(message).toJson(QJsonDocument::Compact);
+      }
       if (m_debug) {
         qDebug() << "TX message (" << msg.length() << " octets) ..." ;
       }
