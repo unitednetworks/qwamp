@@ -23,11 +23,7 @@
 #include <QTime>
 #include <QVariant>
 
-#include <vector>
-#include <map>
 #include <functional>
-
-#include <msgpack.hpp>
 
 class QIODevice;
 
@@ -64,9 +60,9 @@ namespace Autobahn {
 
   /// Represents a procedure registration.
   struct Registration {
-      inline Registration(uint64_t id, const QString &procedure) : id(id), procedure(procedure) {}
+      inline Registration(quint64 id, const QString &procedure) : id(id), procedure(procedure) {}
 
-      uint64_t id;
+      quint64 id;
       QString procedure;
   };
 
@@ -80,9 +76,9 @@ namespace Autobahn {
 
   /// Represents a topic subscription.
   struct Subscription {
-      inline Subscription(uint64_t id, const QString &topic) : id(id), topic(topic) {}
+      inline Subscription(quint64 id, const QString &topic) : id(id), topic(topic) {}
 
-      uint64_t id;
+      quint64 id;
       QString topic;
   };
 
@@ -111,7 +107,7 @@ namespace Autobahn {
 
     signals:
       void started();
-      void joined(uint64_t);
+      void joined(quint64);
       void left(QString);
       void subscribed(Subscription);
       void registered(Registration);
@@ -210,23 +206,6 @@ namespace Autobahn {
 
 
       /**
-       * Calls a remote procedure with no arguments.
-       *
-       * @param procedure The URI of the remote procedure to call.
-       * @return A future that resolves to the result of the remote procedure call.
-       */
-      QVariant call(const QString& procedure);
-
-      /**
-       * Calls a remote procedure with positional arguments.
-       *
-       * @param procedure The URI of the remote procedure to call.
-       * @param args The positional arguments for the call.
-       * @return A future that resolves to the result of the remote procedure call.
-       */
-      QVariant call(const QString& procedure, const QVariantList& args);
-
-      /**
        * Calls a remote procedure with positional and keyword arguments.
        *
        * @param procedure The URI of the remote procedure to call.
@@ -234,7 +213,7 @@ namespace Autobahn {
        * @param kwargs The keyword arguments for the call.
        * @return A future that resolves to the result of the remote procedure call.
        */
-      QVariant call(const QString& procedure, const QVariantList& args, const QVariantMap& kwargs);
+      QVariant call(const QString &procedure, const QVariantList &args = QVariantList(), const QVariantMap &kwargs = QVariantMap());
 
 
       /**
@@ -245,25 +224,12 @@ namespace Autobahn {
        * @param options Options when registering a procedure.
        */
       void provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType = Endpoint::Sync, const QVariantMap& options = QVariantMap());
+      void provideStatistics();
 
       const QHash<QString, CallStatistics> &callStatistics() const { return m_callStatistics; }
+      inline void setEndpointWrapper(EndpointWrapper w) { endpointWrapper = w; }
 
     public Q_SLOTS:
-      /**
-       * Publish an event with empty payload to a topic.
-       *
-       * @param topic The URI of the topic to publish to.
-       */
-      void publish(const QString &topic);
-
-      /**
-       * Publish an event with positional payload to a topic.
-       *
-       * @param topic The URI of the topic to publish to.
-       * @param args The positional payload for the event.
-       */
-      void publish(const QString &topic, const QVariantList &args);
-
       /**
        * Publish an event with both positional and keyword payload to a topic.
        *
@@ -271,30 +237,29 @@ namespace Autobahn {
        * @param args The positional payload for the event.
        * @param kwargs The keyword payload for the event.
        */
-      void publish(const QString& topic, const QVariantList &args, const QVariantMap &kwargs);
-
-      QString makeName(const QString &name) const;
-      inline void setEndpointWrapper(EndpointWrapper w) { endpointWrapper = w; }
+      void publish(const QString &topic, const QVariantList &args = QVariantList(), const QVariantMap &kwargs = QVariantMap());
 
     private:
-
-      QVariant makeCall(const QString& procedure, int aditionalParamCount, std::function<void()> paramCallback = 0);
+      QString makeName(const QString &name) const;
+      bool isUint64(const QVariant &v);
+      QVariant convertParam(const QVariant &arg);
+      QVariantList convertParams(const QVariantList &args);
 
       /// Map of outstanding WAMP calls (request ID -> call).
-      typedef QMap<uint64_t, CallRequest> CallRequests;
+      typedef QHash<quint64, CallRequest> CallRequests;
 
       /// Map of WAMP call ID -> call
       CallRequests callRequests;
 
 
       /// Map of outstanding WAMP subscribe requests (request ID -> subscribe request).
-      typedef QMap<uint64_t, SubscribeRequest> SubscribeRequests;
+      typedef QHash<quint64, SubscribeRequest> SubscribeRequests;
 
       /// Map of WAMP subscribe request ID -> subscribe request
       SubscribeRequests subscribeRequests;
 
       /// Map of subscribed handlers (subscription ID -> handler)
-      typedef QMultiMap<uint64_t, Handler> Handlers;
+      typedef QMultiHash<quint64, Handler> Handlers;
 
       /// Map of WAMP subscription ID -> handler
       Handlers handlers;
@@ -306,61 +271,48 @@ namespace Autobahn {
       /// An outstanding WAMP register request.
 
       /// Map of outstanding WAMP register requests (request ID -> register request).
-      typedef QMap<uint64_t, RegisterRequest> RegisterRequests;
+      typedef QHash<quint64, RegisterRequest> RegisterRequests;
 
       /// Map of WAMP register request ID -> register request
       RegisterRequests registerRequests;
 
-      typedef QMap<uint64_t, Endpoint> Endpoints;
+      typedef QHash<quint64, Endpoint> Endpoints;
       /// Map of WAMP registration ID -> endpoint
       Endpoints endpoints;
 
-      /// An unserialized, raw WAMP message.
-      typedef std::vector<msgpack::object> wamp_msg_t;
-
       /// Process a WAMP ERROR message.
-      void process_error(const wamp_msg_t& msg);
+      void process_error(const QVariantList &msg);
 
       /// Process a WAMP HELLO message.
-      void process_welcome(const wamp_msg_t &msg);
+      void process_welcome(const QVariantList &msg);
 
       /// Process a WAMP RESULT message.
-      void process_call_result(const wamp_msg_t &msg);
+      void process_call_result(const QVariantList &msg);
 
       /// Process a WAMP SUBSCRIBED message.
-      void process_subscribed(const wamp_msg_t &msg);
+      void process_subscribed(const QVariantList &msg);
 
       /// Process a WAMP EVENT message.
-      void process_event(const wamp_msg_t &msg);
+      void process_event(const QVariantList &msg);
 
       /// Process a WAMP REGISTERED message.
-      void process_registered(const wamp_msg_t &msg);
+      void process_registered(const QVariantList &msg);
 
       /// Process a WAMP INVOCATION message.
-      void process_invocation(const wamp_msg_t &msg);
+      void process_invocation(const QVariantList &msg);
 
       /// Process a WAMP GOODBYE message.
-      void process_goodbye(const wamp_msg_t &msg);
+      void process_goodbye(const QVariantList &msg);
 
-
-      /// Unpacks any MsgPack object into QVariant value.
-      QVariant unpackMsg(msgpack::object& obj);
-      QVariantList unpackMsg(std::vector<msgpack::object> &v);
-      QVariantMap unpackMsg(std::map<std::string, msgpack::object> &m);
-
-      /// Pack any value into serializion buffer.
-      void packQVariant(const QVariant& value);
-      void packQVariant(const QVariantList& value);
-      void packQVariant(const QVariantMap& value);
 
       /// Send out message serialized in serialization buffer to ostream.
-      void send();
+      void send(const QVariantList &message);
 
       void get_handshake_reply();
       void get_msg_header();
       void get_msg_body();
 
-      void got_msg(const msgpack::object& obj);
+      void got_msg(const QVariant &obj);
 
       bool m_debug_calls;
       bool m_debug;
@@ -374,23 +326,17 @@ namespace Autobahn {
 
       bool mIsJoined;
       char m_buffer_msg_len[4];
-      uint32_t m_msg_len;
-      uint32_t m_msg_read;
+      quint32 m_msg_len;
+      quint32 m_msg_read;
 
       /// MsgPack serialization buffer.
-      msgpack::sbuffer m_buffer;
-
-      /// MsgPacker serialization packer.
-      msgpack::packer<msgpack::sbuffer> m_packer;
-
-      /// MsgPack unserialization unpacker.
-      msgpack::unpacker m_unpacker;
+      QByteArray readBuffer;
 
       /// WAMP session ID (if the session is joined to a realm).
-      uint64_t m_session_id;
+      quint64 m_session_id;
 
       /// Last request ID of outgoing WAMP requests.
-      uint64_t m_request_id;
+      quint64 m_request_id;
 
       bool m_goodbye_sent;
       QString m_name;
@@ -406,7 +352,7 @@ namespace Autobahn {
       State state;
 
       /// WAMP message type codes.
-      enum class msg_code : int {
+      enum class WampMsgCode : int {
         HELLO = 1,
         WELCOME = 2,
         ABORT = 3,

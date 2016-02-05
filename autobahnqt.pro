@@ -17,7 +17,7 @@ QMAKE_CXXFLAGS += -Wno-unused-parameter   #kvuli msgpack
 QMAKE_CXXFLAGS += -pthread
 QMAKE_CXXFLAGS_DEBUG += -DDEBUG
 
-INCLUDEPATH += ../msgpack-c/include
+INCLUDEPATH += ../qmsgpack/src
 
 SOURCES += \
     autobahn_qt.cpp \

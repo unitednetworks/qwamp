@@ -226,7 +226,7 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
       }
       nameParts << methodIterator.key();
       QString crossbarMethodName = nameParts.join(".");
-      qDebug() << "Registering" << session.makeName(crossbarMethodName) << qPrintable(methodIterator.value().count() > 1 ? ("(" + QString::number(methodIterator.value().count()) + "x)") : QString());
+      qDebug() << "Registering" << (session.name().isEmpty() ? crossbarMethodName : session.name() + "." + crossbarMethodName) << qPrintable(methodIterator.value().count() > 1 ? ("(" + QString::number(methodIterator.value().count()) + "x)") : QString());
 
       struct Method {
           QMetaMethod metaMethod;

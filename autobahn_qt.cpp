@@ -29,6 +29,10 @@
 #include <QString>
 #include <QVariant>
 
+#include <msgpack.h>
+
+#include <arpa/inet.h>
+
 namespace Autobahn {
 
   Session::Session(QIODevice &in, QIODevice &out, bool debug_calls, bool debug)
@@ -40,7 +44,6 @@ namespace Autobahn {
       m_out(out),
       mIsJoined(false),
       m_msg_read(0),
-      m_packer(&m_buffer),
       m_session_id(0),
       m_request_id(0),
       m_goodbye_sent(false),
@@ -50,27 +53,7 @@ namespace Autobahn {
       m_stopped = true;
       state = Initial;
     });
-    connect(this, &Session::joined, [this]() {
-      provide("api.getStatistics", [this](const QVariantList &args, const QVariantMap &kwargs) {
-        int totalCalls = 0;
-        int totalTime = 0;
-        QVariantMap stl;
-        for (const QString &key : m_callStatistics.keys()) {
-          const CallStatistics &c = m_callStatistics[key];
-          totalCalls += c.callNumber;
-          totalTime += c.callNumber * c.averageTime;
-          QVariantMap m;
-          m["calls"] = c.callNumber;
-          m["averageTime"] = c.averageTime;
-          stl[key] = m;
-        }
-        QVariantMap st;
-        st["procedures"] = stl;
-        st["totalCalls"] = totalCalls;
-        st["totalAverage"] = totalTime / totalCalls;
-        return st;
-      });
-    });
+//    MsgPack::registerType(QMetaType::QDateTime, 37);
   }
 
   Session::Session(QIODevice &inout, bool debug_calls, bool debug) : Session(inout, inout, debug_calls, debug)
@@ -94,6 +77,28 @@ namespace Autobahn {
   void Session::setName(const QString &name)
   {
     m_name = name;
+  }
+
+  void Session::provideStatistics() {
+    provide("api.getStatistics", [this](const QVariantList &args, const QVariantMap &kwargs) {
+      int totalCalls = 0;
+      int totalTime = 0;
+      QVariantMap stl;
+      for (const QString &key : m_callStatistics.keys()) {
+        const CallStatistics &c = m_callStatistics[key];
+        totalCalls += c.callNumber;
+        totalTime += c.callNumber * c.averageTime;
+        QVariantMap m;
+        m["calls"] = c.callNumber;
+        m["averageTime"] = c.averageTime;
+        stl[key] = m;
+      }
+      QVariantMap st;
+      st["procedures"] = stl;
+      st["totalCalls"] = totalCalls;
+      st["totalAverage"] = totalTime / totalCalls;
+      return st;
+    });
   }
 
   void Session::start() {
@@ -163,50 +168,37 @@ namespace Autobahn {
   void Session::join(const QString& realm) {
     // [HELLO, Realm|uri, Details|dict]
 
-    m_packer.pack_array(3);
+    QVariantList msg;
+    msg << static_cast<int>(WampMsgCode::HELLO) << realm;
 
-    m_packer.pack(static_cast<int> (msg_code::HELLO));
-    m_packer.pack(realm.toStdString());
+    QVariantMap roles;
+    roles["caller"] = QVariantMap();
+    roles["callee"] = QVariantMap();
+    roles["publisher"] = QVariantMap();
+    roles["subscriber"] = QVariantMap();
+    QVariantMap m;
+    m["roles"] = roles;
+    msg << m;
 
-    m_packer.pack_map(1);
-    m_packer.pack(std::string("roles"));
-
-    m_packer.pack_map(4);
-
-    m_packer.pack(std::string("caller"));
-    m_packer.pack_map(0);
-
-    m_packer.pack(std::string("callee"));
-    m_packer.pack_map(0);
-
-    m_packer.pack(std::string("publisher"));
-    m_packer.pack_map(0);
-
-    m_packer.pack(std::string("subscriber"));
-    m_packer.pack_map(0);
-
-    send();
+    send(msg);
   }
 
 
-   void Session::subscribe(const QString &topic, Handler handler) {
+  void Session::subscribe(const QString &topic, Handler handler) {
 
-      if (!m_session_id) {
-         throw no_session_error();
-      }
+    if (!m_session_id) {
+      throw no_session_error();
+    }
 
-      // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
+    // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
 
-      m_request_id += 1;
-      subscribeRequests.insert(m_request_id, SubscribeRequest(topic, handler));
+    m_request_id += 1;
+    subscribeRequests.insert(m_request_id, SubscribeRequest(topic, handler));
 
-      m_packer.pack_array(4);
-      m_packer.pack(static_cast<int> (msg_code::SUBSCRIBE));
-      m_packer.pack(m_request_id);
-      m_packer.pack_map(0);
-      m_packer.pack(topic.toStdString());
-      send();
-   }
+    QVariantList message;
+    message << static_cast<int>(WampMsgCode::SUBSCRIBE) << m_request_id << QVariantMap() << topic;
+    send(message);
+  }
 
 
   void Session::provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType, const QVariantMap &options) {
@@ -246,18 +238,11 @@ namespace Autobahn {
      registerRequests.insert(m_request_id, RegisterRequest(procedureName, endpoint));
 
      // [REGISTER, Request|id, Options|dict, Procedure|uri]
-
-     m_packer.pack_array(4);
-     m_packer.pack(static_cast<int> (msg_code::REGISTER));
-     m_packer.pack(m_request_id);
-     //m_packer.pack_map(0);
-     packQVariant(options);
-     m_packer.pack(procedureName.toStdString());
-     send();
+     send(QVariantList() << static_cast<int>(WampMsgCode::REGISTER) << m_request_id << options << procedureName);
   }
 
 
-  void Session::publish(const QString &topic) {
+  void Session::publish(const QString &topic, const QVariantList &args, const QVariantMap &kwargs) {
 
     if (!m_session_id) {
       throw no_session_error();
@@ -265,65 +250,18 @@ namespace Autobahn {
 
     m_request_id += 1;
 
-    // [PUBLISH, Request|id, Options|dict, Topic|uri]
+    // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
 
-    m_packer.pack_array(4);
-    m_packer.pack(static_cast<int> (msg_code::PUBLISH));
-    m_packer.pack(m_request_id);
-    m_packer.pack_map(0);
-    m_packer.pack(makeName(topic).toStdString());
-    send();
-  }
+    QVariantList message;
+    message << static_cast<int>(WampMsgCode::PUBLISH) << m_request_id << QVariantMap() << makeName(topic);
 
-
-  void Session::publish(const QString& topic, const QVariantList& args) {
-
-    if (!m_session_id) {
-      throw no_session_error();
+    if (args.count()) {
+      message << QVariant(args);
+      if (kwargs.count()) {
+        message << kwargs;
+      }
     }
-
-    if (args.count() > 0) {
-      m_request_id += 1;
-
-      // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list]
-
-      m_packer.pack_array(5);
-      m_packer.pack(static_cast<int> (msg_code::PUBLISH));
-      m_packer.pack(m_request_id);
-      m_packer.pack_map(0);
-      m_packer.pack(makeName(topic).toStdString());
-      packQVariant(args);
-      send();
-    }
-    else {
-      publish(topic);
-    }
-  }
-
-
-  void Session::publish(const QString& topic, const QVariantList& args, const QVariantMap& kwargs) {
-
-    if (!m_session_id) {
-      throw no_session_error();
-    }
-
-    if (kwargs.count() > 0) {
-      m_request_id += 1;
-
-      // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
-
-      m_packer.pack_array(6);
-      m_packer.pack(static_cast<int> (msg_code::PUBLISH));
-      m_packer.pack(m_request_id);
-      m_packer.pack_map(0);
-      m_packer.pack(makeName(topic).toStdString());
-      packQVariant(args);
-      packQVariant(kwargs);
-      send();
-    }
-    else {
-      publish(topic, args);
-    }
+    send(message);
   }
 
   QString Session::makeName(const QString &name) const
@@ -335,7 +273,46 @@ namespace Autobahn {
     return n + name;
   }
 
-  QVariant Session::makeCall(const QString& procedure, int aditionalParamCount, std::function<void()> paramCallback) {
+  QVariantList Session::convertParams(const QVariantList &args) {
+    QVariantList r;
+    for (const QVariant &v : args) {
+      r << convertParam(v);
+    }
+    return r;
+  }
+
+  QVariant Session::convertParam(const QVariant &arg) {
+    if (arg.type() == QVariant::List) {
+      QVariantList r;
+      for (const QVariant &v : arg.toList()) {
+        r << convertParam(v);
+      }
+      return r;
+    }
+    if (arg.type() == QVariant::Map) {
+      QVariantMap r;
+      QVariantMap map = arg.toMap();
+      for (auto mapIterator = map.cbegin(); mapIterator != map.cend(); ++mapIterator) {
+        r.insert(mapIterator.key(), convertParam(mapIterator.value()));
+      }
+      return r;
+    }
+    if (arg.type() == QVariant::Date) {
+      return arg.toDate().toString(Qt::DateFormat::ISODate);
+    }
+    if (arg.type() == QVariant::DateTime) {
+      return arg.toDateTime().toString(Qt::DateFormat::ISODate);
+    }
+    if (arg.type() != QVariant::UserType && QMetaType(arg.type()).flags() & QMetaType::IsEnumeration) {
+      return arg.toString();
+    }
+    if (arg.type() == QVariant::UserType && QMetaType(arg.userType()).flags() & QMetaType::IsEnumeration) {
+      return arg.toString();
+    }
+    return arg;
+  }
+
+  QVariant Session::call(const QString &procedure, const QVariantList &args, const QVariantMap &kwargs) {
 
     if (!m_session_id) {
       throw no_session_error();
@@ -345,15 +322,15 @@ namespace Autobahn {
     CallRequests::iterator callRequestsIterator = callRequests.insert(m_request_id, CallRequest());
     // [CALL, Request|id, Options|dict, Procedure|uri]
 
-    m_packer.pack_array(4 + aditionalParamCount);
-    m_packer.pack(static_cast<int> (msg_code::CALL));
-    m_packer.pack(m_request_id);
-    m_packer.pack_map(0);
-    m_packer.pack(procedure.toStdString());
-    if (paramCallback) {
-      paramCallback();
+    QVariantList message;
+    message << static_cast<int> (WampMsgCode::CALL) << m_request_id << QVariantMap() << procedure;
+    if (args.count()) {
+      message << QVariant(convertParams(args));
+      if (kwargs.count()) {
+        message << kwargs;
+      }
     }
-    send();
+    send(message);
 
     CallRequest &callRequest = callRequestsIterator.value();
     while (true){
@@ -365,6 +342,7 @@ namespace Autobahn {
         return resultMap;
       }
       readData();
+
 //      QCoreApplication::processEvents(); //to call readData by signal
       if (callRequest.ready) {           //add exception handling
         QVariant result;
@@ -384,144 +362,92 @@ namespace Autobahn {
     }
   }
 
-  QVariant Session::call(const QString& procedure) {
-    return makeCall(procedure, 0);
-  }
+
+//  void Session::packQVariant(const QVariant& value) {
+
+//    if (value.isNull()) {
+//      m_packer.pack_nil();
+//    }
+//    else if (value.type() == QVariant::List || value.type() == QVariant::StringList) {
+//      packQVariant(value.toList());
+//    }
+//    else if (value.type() == QVariant::Map) {
+//      packQVariant(value.toMap());
+//    }
+//    else if (value.type() == QVariant::Int) {
+//      int val = value.toInt();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::LongLong) {
+//      uint64_t val = value.toLongLong();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::Bool) {
+//      bool val = value.toBool();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::Double) {
+//      double val = value.toDouble();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::String) {
+//      std::string val = value.toString().toStdString();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::ByteArray) {
+//      std::string val = value.toByteArray().toStdString();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::Date) {
+//      std::string val = value.toDate().toString(Qt::DateFormat::ISODate).toStdString();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::DateTime) {
+//      std::string val = value.toDateTime().toString(Qt::DateFormat::ISODate).toStdString();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() != QVariant::UserType && QMetaType(value.type()).flags() & QMetaType::IsEnumeration) {
+//      std::string val = value.toString().toStdString();
+//      m_packer.pack(val);
+//    }
+//    else if (value.type() == QVariant::UserType && QMetaType(value.userType()).flags() & QMetaType::IsEnumeration) {
+//      std::string val = value.toString().toStdString();
+//      m_packer.pack(val);
+//    }
+//    else {
+//      qDebug() << "Warning: don't know how to pack type" << value.typeName() << value.type();
+//    }
+//  }
 
 
-  QVariant Session::call(const QString& procedure, const QVariantList& args) {
-
-    if (args.count() > 0) {
-      return makeCall(procedure, 1, [&]() {
-        packQVariant(args);
-      });
+  void Session::process_welcome(const QVariantList &msg) {
+    if (msg.length() < 2) {
+      throw protocol_error("Bad welcome response");
     }
-    else {
-      return call(procedure);
-    }
-  }
-
-
-  QVariant Session::call(const QString& procedure, const QVariantList& args, const QVariantMap& kwargs) {
-
-    if (kwargs.count() > 0) {
-      return makeCall(procedure, 2, [&]() {
-        packQVariant(args);
-        packQVariant(kwargs);
-      });
-    }
-    else {
-      return call(procedure, args);
-    }
-  }
-
-
-  void Session::packQVariant(const QVariantList& list) {
-    m_packer.pack_array(list.count());
-
-    for (const QVariant &v : list) {
-      packQVariant(v);
-    }
-  }
-
-  void Session::packQVariant(const QVariantMap& map) {
-    m_packer.pack_map(map.count());
-
-    QMap<QString, QVariant>::const_iterator i = map.constBegin();
-    while (i != map.constEnd()) {
-      m_packer.pack(i.key().toStdString());
-      packQVariant(i.value());
-      ++i;
-    }
-  }
-
-  void Session::packQVariant(const QVariant& value) {
-
-    if (value.isNull()) {
-      m_packer.pack_nil();
-    }
-    else if (value.type() == QVariant::List || value.type() == QVariant::StringList) {
-      packQVariant(value.toList());
-    }
-    else if (value.type() == QVariant::Map) {
-      packQVariant(value.toMap());
-    }
-    else if (value.type() == QVariant::Int) {
-      int val = value.toInt();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::LongLong) {
-      uint64_t val = value.toLongLong();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::Bool) {
-      bool val = value.toBool();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::Double) {
-      double val = value.toDouble();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::String) {
-      std::string val = value.toString().toStdString();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::ByteArray) {
-      std::string val = value.toByteArray().toStdString();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::Date) {
-      std::string val = value.toDate().toString(Qt::DateFormat::ISODate).toStdString();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::DateTime) {
-      std::string val = value.toDateTime().toString(Qt::DateFormat::ISODate).toStdString();
-      m_packer.pack(val);
-    }
-    else if (value.type() != QVariant::UserType && QMetaType(value.type()).flags() & QMetaType::IsEnumeration) {
-      std::string val = value.toString().toStdString();
-      m_packer.pack(val);
-    }
-    else if (value.type() == QVariant::UserType && QMetaType(value.userType()).flags() & QMetaType::IsEnumeration) {
-      std::string val = value.toString().toStdString();
-      m_packer.pack(val);
-    }
-    else {
-      qDebug() << "Warning: don't know how to pack type" << value.typeName() << value.type();
-    }
-  }
-
-
-  void Session::process_welcome(const wamp_msg_t& msg) {
-    m_session_id = msg[1].as<uint64_t>();
+    m_session_id = msg[1].toULongLong();
     mIsJoined = true;
     emit joined(m_session_id);
   }
 
 
-  void Session::process_goodbye(const wamp_msg_t& msg) {
+  void Session::process_goodbye(const QVariantList &msg) {
 
     m_session_id = 0;
 
     if (!m_goodbye_sent) {
-
       // if we did not initiate closing, reply ..
-
       // [GOODBYE, Details|dict, Reason|uri]
-
-      m_packer.pack_array(3);
-
-      m_packer.pack(static_cast<int> (msg_code::GOODBYE));
-      m_packer.pack_map(0);
-      m_packer.pack(std::string("wamp.error.goodbye_and_out"));
-      send();
+      send(QVariantList() << static_cast<int> (WampMsgCode::GOODBYE) << QVariantMap() << QString("wamp.error.goodbye_and_out"));
     }
     else {
       // we previously initiated closing, so this
       // is the peer reply
     }
-    std::string reason = msg[2].as<std::string>();
-    emit left(QString::fromStdString(reason));
+    if (msg.length() < 3) {
+      throw protocol_error("Bad goobay response");
+    }
+    QString reason = msg[2].toString();
+    emit left(reason);
     m_goodbye_sent = false;
     mIsJoined = false;
  }
@@ -537,76 +463,66 @@ namespace Autobahn {
     m_session_id = 0;
 
     // [GOODBYE, Details|dict, Reason|uri]
-
-    m_packer.pack_array(3);
-
-    m_packer.pack(static_cast<int> (msg_code::GOODBYE));
-    m_packer.pack_map(0);
-    m_packer.pack(reason.toStdString());
-    send();
+    send(QVariantList() << static_cast<int>(WampMsgCode::GOODBYE) << QVariantMap() << reason);
   }
 
-  QVariantList Session::unpackMsg(std::vector<msgpack::object> &v) {
-    QList<QVariant> list;
-    list.reserve(v.size());
-    for (msgpack::object &o : v) {
-      list.append(unpackMsg(o));
-    }
-    return list;
-  }
+//  QVariantList Session::unpackMsg(std::vector<msgpack::object> &v) {
+//    QList<QVariant> list;
+//    list.reserve(v.size());
+//    QTime timer;
+//    timer.start();
+//    qDebug() << "unpacking vector";
+//    for (msgpack::object &o : v) {
+//      list.append(unpackMsg(o));
+//    }
+//    qDebug() << "unpacked vector" << timer.elapsed();
+//    return list;
+//  }
 
-  QVariantMap Session::unpackMsg(std::map<std::string, msgpack::object> &m) {
-    QVariantMap map;
-    for (auto &in : m) {
-      map.insert(QString::fromStdString(in.first), unpackMsg(in.second));
-    }
-    return map;
-  }
+//  QVariant Session::unpackMsg(msgpack::object& obj) {
+//    switch (obj.type) {
 
-  QVariant Session::unpackMsg(msgpack::object& obj) {
-    switch (obj.type) {
+//      case msgpack::type::STR:
+//        return QVariant(QString::fromStdString(obj.as<std::string>()));
 
-      case msgpack::type::STR:
-        return QVariant(QString::fromStdString(obj.as<std::string>()));
+//      case msgpack::type::POSITIVE_INTEGER:
+//        return QVariant((quint64)obj.as<uint64_t>());
 
-      case msgpack::type::POSITIVE_INTEGER:
-        return QVariant((qulonglong)obj.as<uint64_t>());
+//      case msgpack::type::NEGATIVE_INTEGER:
+//        return QVariant((quint64)obj.as<int64_t>());
 
-      case msgpack::type::NEGATIVE_INTEGER:
-        return QVariant((qulonglong)obj.as<int64_t>());
+//      case msgpack::type::BOOLEAN:
+//        return QVariant(obj.as<bool>());
 
-      case msgpack::type::BOOLEAN:
-        return QVariant(obj.as<bool>());
+//      case msgpack::type::FLOAT:
+//        return QVariant(obj.as<double>());
 
-      case msgpack::type::FLOAT:
-        return QVariant(obj.as<double>());
+//      case msgpack::type::NIL:
+//        return QVariant();
 
-      case msgpack::type::NIL:
-        return QVariant();
+//      case msgpack::type::ARRAY:
+//        {
+//          std::vector<msgpack::object> in_vec;
+//          obj.convert(&in_vec);
 
-      case msgpack::type::ARRAY:
-        {
-          std::vector<msgpack::object> in_vec;
-          obj.convert(&in_vec);
+//          return QVariant(unpackMsg(in_vec));
+//        }
 
-          return QVariant(unpackMsg(in_vec));
-        }
+//      case msgpack::type::MAP:
+//        {
+//          std::map<std::string, msgpack::object> in_map;
+//          obj.convert(&in_map);
 
-      case msgpack::type::MAP:
-        {
-          std::map<std::string, msgpack::object> in_map;
-          obj.convert(&in_map);
+//          return QVariant(unpackMsg(in_map));
+//        }
 
-          return QVariant(unpackMsg(in_map));
-        }
-
-      default:
-        return QVariant();
-    }
-  }
+//      default:
+//        return QVariant();
+//    }
+//  }
 
 
-  void Session::process_error(const wamp_msg_t& msg) {
+  void Session::process_error(const QVariantList &msg) {
 
     // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
     // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
@@ -614,65 +530,65 @@ namespace Autobahn {
 
     // message length
     //
-    if (msg.size() != 5 && msg.size() != 6 && msg.size() != 7) {
+    if (msg.length() != 5 && msg.length() != 6 && msg.length() != 7) {
       throw protocol_error("invalid ERROR message structure - length must be 5, 6 or 7");
     }
 
     // REQUEST.Type|int
     //
-    if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[1])) {
       throw protocol_error("invalid ERROR message structure - REQUEST.Type must be an integer");
     }
-    msg_code request_type = static_cast<msg_code> (msg[1].as<int>());
+    WampMsgCode request_type = static_cast<WampMsgCode>(msg[1].toInt());
 
-    if (request_type != msg_code::CALL &&
-        request_type != msg_code::REGISTER &&
-        request_type != msg_code::UNREGISTER &&
-        request_type != msg_code::PUBLISH &&
-        request_type != msg_code::SUBSCRIBE &&
-        request_type != msg_code::UNSUBSCRIBE) {
+    if (request_type != WampMsgCode::CALL &&
+        request_type != WampMsgCode::REGISTER &&
+        request_type != WampMsgCode::UNREGISTER &&
+        request_type != WampMsgCode::PUBLISH &&
+        request_type != WampMsgCode::SUBSCRIBE &&
+        request_type != WampMsgCode::UNSUBSCRIBE) {
       throw protocol_error("invalid ERROR message - ERROR.Type must one of CALL, REGISTER, UNREGISTER, SUBSCRIBE, UNSUBSCRIBE");
     }
 
     // REQUEST.Request|id
     //
-    if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[2])) {
       throw protocol_error("invalid ERROR message structure - REQUEST.Request must be an integer");
     }
-    uint64_t request_id = msg[2].as<uint64_t>();
+    quint64 request_id = msg[2].toInt();
 
     // Details
     //
-    if (msg[3].type != msgpack::type::MAP) {
+    if (msg[3].type() != QVariant::Map) {
       throw protocol_error("invalid ERROR message structure - Details must be a dictionary");
     }
 
     // Error|uri
     //
-    if (msg[4].type != msgpack::type::STR) {
+    if (msg[4].type() != QVariant::String) {
       throw protocol_error("invalid ERROR message - Error must be a string (URI)");
     }
-    std::string error = msg[4].as<std::string>();
+    QString error = msg[4].toString();
 
     // Arguments|list
     //
-    if (msg.size() > 5) {
-      if (msg[5].type  != msgpack::type::ARRAY) {
+    if (msg.length() > 5) {
+      if (msg[5].type() != QVariant::List) {
         throw protocol_error("invalid ERROR message structure - Arguments must be a list");
       }
     }
 
     // ArgumentsKw|list
     //
-    if (msg.size() > 6) {
-      if (msg[6].type  != msgpack::type::MAP) {
+    if (msg.length() > 6) {
+      if (msg[6].type() != QVariant::Map) {
         throw protocol_error("invalid ERROR message structure - ArgumentsKw must be a dictionary");
       }
     }
 
     switch (request_type) {
 
-      case msg_code::CALL:
+      case WampMsgCode::CALL:
         {
           //
           // process CALL ERROR
@@ -684,7 +600,7 @@ namespace Autobahn {
             // FIXME: forward all error info .. also not sure if this is the correct
             // way to use set_exception()
             callIterator.value().ready = true;
-            callIterator.value().ex = QString::fromStdString(error);
+            callIterator.value().ex = error;
           }
           else {
             throw protocol_error("bogus ERROR message for non-pending CALL request ID");
@@ -694,31 +610,31 @@ namespace Autobahn {
 
         // FIXME: handle other error messages
       default:
-        qDebug() << "unhandled ERROR message" << (int)request_type;
+        qDebug() << QStringLiteral("unhandled ERROR message") << (int)request_type;
     }
   }
 
-  void Session::process_invocation(const wamp_msg_t& msg) {
+  void Session::process_invocation(const QVariantList &msg) {
 
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict]
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list]
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list, CALL.ArgumentsKw|dict]
 
-    if (msg.size() != 4 && msg.size() != 5 && msg.size() != 6) {
+    if (msg.length() != 4 && msg.length() != 5 && msg.length() != 6) {
       throw protocol_error("invalid INVOCATION message structure - length must be 4, 5 or 6");
     }
 
-    if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[1])) {
       throw protocol_error("invalid INVOCATION message structure - INVOCATION.Request must be an integer");
     }
-    uint64_t request_id = msg[1].as<uint64_t>();
+    quint64 request_id = msg[1].toULongLong();
 
-    if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[2])) {
       throw protocol_error("invalid INVOCATION message structure - INVOCATION.Registration must be an integer");
     }
-    uint64_t registration_id = msg[2].as<uint64_t>();
+    quint64 registration_id = msg[2].toULongLong();
 
-    const QMap<uint64_t, Endpoint>::iterator endpointIterator = endpoints.find(registration_id);
+    const QHash<quint64, Endpoint>::iterator endpointIterator = endpoints.find(registration_id);
 
     if (endpointIterator == endpoints.end()) {
       throw protocol_error("bogus RESULT message for non-pending request ID");
@@ -726,7 +642,7 @@ namespace Autobahn {
     else {
       Endpoint endpoint = endpointIterator.value();
 
-      if (msg[3].type != msgpack::type::MAP) {
+      if (msg[3].type() != QVariant::Map) {
         throw protocol_error("invalid INVOCATION message structure - Details must be a dictionary");
       }
 
@@ -742,20 +658,19 @@ namespace Autobahn {
       else {
         endpointFunction = endpoint.function;
       }
-      if (msg.size() > 4) {
+      if (msg.length() > 4) {
 
-        if (msg[4].type != msgpack::type::ARRAY) {
+        if (msg[4].type() != QVariant::List) {
           throw protocol_error("invalid INVOCATION message structure - INVOCATION.Arguments must be a list");
         }
 
-        std::vector<msgpack::object> raw_args;
-        msg[4].convert(&raw_args);
-        args = unpackMsg(raw_args);
+        args = msg[4].toList();
 
-        if (msg.size() > 5) {
-          std::map<std::string, msgpack::object> raw_kwargs;
-          msg[5].convert(&raw_kwargs);
-          kwargs = unpackMsg(raw_kwargs);
+        if (msg.length() > 5) {
+          if (msg[5].type() != QVariant::Map) {
+            throw protocol_error("invalid INVOCATION message structure - INVOCATION.ArgumentsKw must be a dictionary");
+          }
+          kwargs = msg[5].toMap();
         }
       }
 
@@ -770,26 +685,14 @@ namespace Autobahn {
 
         if (endpoint.type == Endpoint::Sync) {
           QVariant res = endpointFunction(args, kwargs);
-          m_packer.pack_array(4);
-          m_packer.pack(static_cast<int> (msg_code::YIELD));
-          m_packer.pack(request_id);
-          m_packer.pack_map(0);
-          m_packer.pack_array(1);
-          packQVariant(res);
-          send();
+          send(QVariantList() << static_cast<int>(WampMsgCode::YIELD) << request_id << QVariantMap() << QVariant(QVariantList() << res));
         }
         else {
           QFutureWatcher<QVariant> *watcher = new QFutureWatcher<QVariant>();
           QFuture<QVariant> future = QtConcurrent::run(endpointFunction, args, kwargs);
           QObject::connect(watcher, &QFutureWatcher<QVariant>::finished, [this, request_id, watcher, future] {
             QVariant res = future.result();
-            m_packer.pack_array(4);
-            m_packer.pack(static_cast<int> (msg_code::YIELD));
-            m_packer.pack(request_id);
-            m_packer.pack_map(0);
-            m_packer.pack_array(1);
-            packQVariant(res);
-            send();
+            send(QVariantList() << static_cast<int>(WampMsgCode::YIELD) << request_id << QVariantMap() << QVariant(QVariantList() << res));
             watcher->deleteLater();
           });
           watcher->setFuture(future);
@@ -804,51 +707,48 @@ namespace Autobahn {
       catch (const std::exception& e) {
         // we can at least describe the error with e.what()
         //
-        m_packer.pack_array(7);
-        m_packer.pack(static_cast<int> (msg_code::ERROR));
-        m_packer.pack(static_cast<int> (msg_code::INVOCATION));
-        m_packer.pack(request_id);
-        m_packer.pack_map(0);
-        m_packer.pack(std::string("wamp.error.runtime_error"));
-        m_packer.pack_array(0);
-
-        m_packer.pack_map(1);
-
-        m_packer.pack(std::string("what"));
-        m_packer.pack(std::string(e.what()));
-
-        send();
+        QVariantMap exception;
+        exception["what"] = e.what();
+        send(QVariantList()
+             << static_cast<int>(WampMsgCode::ERROR)
+             << static_cast<int> (WampMsgCode::INVOCATION)
+             << request_id
+             << QVariantMap()
+             << "wamp.error.runtime_error"
+             << QVariantList()
+             << exception
+             );
       }
       catch (...) {
         // no information available on actual error
         //
-        m_packer.pack_array(5);
-        m_packer.pack(static_cast<int> (msg_code::ERROR));
-        m_packer.pack(static_cast<int> (msg_code::INVOCATION));
-        m_packer.pack(request_id);
-        m_packer.pack_map(0);
-        m_packer.pack(std::string("wamp.error.runtime_error"));
-        send();
+        send(QVariantList()
+             << static_cast<int>(WampMsgCode::ERROR)
+             << static_cast<int> (WampMsgCode::INVOCATION)
+             << request_id
+             << QVariantMap()
+             << "wamp.error.runtime_error"
+             );
       }
 
     }
   }
 
-  void Session::process_call_result(const wamp_msg_t& msg) {
+  void Session::process_call_result(const QVariantList &msg) {
 
     // [RESULT, CALL.Request|id, Details|dict]
     // [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list]
     // [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list, YIELD.ArgumentsKw|dict]
 
-    if (msg.size() != 3 && msg.size() != 4 && msg.size() != 5) {
+    if (msg.length() != 3 && msg.length() != 4 && msg.length() != 5) {
       throw protocol_error("invalid RESULT message structure - length must be 3, 4 or 5");
     }
 
-    if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[1])) {
       throw protocol_error("invalid RESULT message structure - CALL.Request must be an integer");
     }
 
-    uint64_t request_id = msg[1].as<uint64_t>();
+    quint64 request_id = msg[1].toULongLong();
 
     CallRequests::iterator callRequestIterator = callRequests.find(request_id);
 
@@ -857,42 +757,42 @@ namespace Autobahn {
       CallRequest &callRequest = callRequestIterator.value();
       callRequest.ready = true;
 
-      if (msg[2].type != msgpack::type::MAP) {
+      if (msg[2].type() != QVariant::Map) {
         throw protocol_error("invalid RESULT message structure - Details must be a dictionary");
       }
 
-      if (msg.size() > 3) {
+      if (msg.length() > 3) {
 
-        if (msg[3].type != msgpack::type::ARRAY) {
+        if (msg[3].type() != QVariant::List) {
           throw protocol_error("invalid RESULT message structure - YIELD.Arguments must be a list");
         }
 
-        std::vector<msgpack::object> raw_args;
-        msg[3].convert(&raw_args);
+        QVariantList args = msg[3].toList();
 
-        QVariantList args = unpackMsg(raw_args);
-
-        if (args.size() > 0) {
+        if (args.length() > 0) {
           callRequest.result = args[0];
         }
       }
     }
   }
 
+  bool Session::isUint64(const QVariant &v) {
+    return v.type() == QVariant::Int || v.type() == QVariant::LongLong || v.type() == QVariant::UInt || v.type() == QVariant::ULongLong;
+  }
 
-  void Session::process_subscribed(const wamp_msg_t& msg) {
+  void Session::process_subscribed(const QVariantList &msg) {
 
     // [SUBSCRIBED, SUBSCRIBE.Request|id, Subscription|id]
 
-    if (msg.size() != 3) {
+    if (msg.length() != 3) {
       throw protocol_error("invalid SUBSCRIBED message structure - length must be 3");
     }
 
-    if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[1])) {
       throw protocol_error("invalid SUBSCRIBED message structure - SUBSCRIBED.Request must be an integer");
     }
 
-    uint64_t request_id = msg[1].as<uint64_t>();
+    quint64 request_id = msg[1].toULongLong();
 
     SubscribeRequests::iterator subscribeRequestIterator = subscribeRequests.find(request_id);
 
@@ -901,11 +801,11 @@ namespace Autobahn {
     }
     else {
 
-      if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
+      if (!isUint64(msg[2])) {
         throw protocol_error("invalid SUBSCRIBED message structure - SUBSCRIBED.Subscription must be an integer");
       }
 
-      uint64_t subscription_id = msg[2].as<uint64_t>();
+      quint64 subscription_id = msg[2].toULongLong();
 
       SubscribeRequest &subscribeRequest = subscribeRequestIterator.value();
 
@@ -918,58 +818,50 @@ namespace Autobahn {
   }
 
 
-  void Session::process_event(const wamp_msg_t& msg) {
+  void Session::process_event(const QVariantList &msg) {
 
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict]
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list]
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list, PUBLISH.ArgumentsKw|dict]
 
-    if (msg.size() != 4 && msg.size() != 5 && msg.size() != 6) {
+    if (msg.length() != 4 && msg.length() != 5 && msg.length() != 6) {
       throw protocol_error("invalid EVENT message structure - length must be 4, 5 or 6");
     }
 
-    if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[1])) {
       throw protocol_error("invalid EVENT message structure - SUBSCRIBED.Subscription must be an integer");
     }
 
-    uint64_t subscription_id = msg[1].as<uint64_t>();
+    quint64 subscription_id = msg[1].toULongLong();
 
     Handlers::iterator handlerIterator = handlers.find(subscription_id);
 
     if (handlerIterator != handlers.end()) {
 
-      if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
-        throw protocol_error("invalid EVENT message structure - PUBLISHED.Publication|id must be an integer");
-      }
+//      if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
+//        throw protocol_error("invalid EVENT message structure - PUBLISHED.Publication|id must be an integer");
+//      }
 
       //uint64_t publication_id = msg[2].as<uint64_t>();
 
-      if (msg[3].type != msgpack::type::MAP) {
+      if (msg[3].type() != QVariant::Map) {
         throw protocol_error("invalid EVENT message structure - Details must be a dictionary");
       }
 
       QVariantList args;
       QVariantMap kwargs;
 
-      if (msg.size() > 4) {
-
-        if (msg[4].type != msgpack::type::ARRAY) {
+      if (msg.length() > 4) {
+        if (msg[4].type() != QVariant::List) {
           throw protocol_error("invalid EVENT message structure - EVENT.Arguments must be a list");
         }
+        args = msg[4].toList();
 
-        std::vector<msgpack::object> raw_args;
-        msg[4].convert(&raw_args);
-        args = unpackMsg(raw_args);
-
-        if (msg.size() > 5) {
-
-          if (msg[5].type != msgpack::type::MAP) {
+        if (msg.length() > 5) {
+          if (msg[5].type() != QVariant::Map) {
             throw protocol_error("invalid EVENT message structure - EVENT.Arguments must be a list");
           }
-
-          std::map<std::string, msgpack::object> raw_kwargs;
-          msg[5].convert(&raw_kwargs);
-          kwargs = unpackMsg(raw_kwargs);
+          kwargs = msg[5].toMap();
         }
       }
 
@@ -999,19 +891,19 @@ namespace Autobahn {
   }
 
 
-   void Session::process_registered(const wamp_msg_t& msg) {
+   void Session::process_registered(const QVariantList &msg) {
 
       // [REGISTERED, REGISTER.Request|id, Registration|id]
 
-      if (msg.size() != 3) {
+      if (msg.length() != 3) {
          throw protocol_error("invalid REGISTERED message structure - length must be 3");
       }
 
-      if (msg[1].type != msgpack::type::POSITIVE_INTEGER) {
+      if (!isUint64(msg[1])) {
          throw protocol_error("invalid REGISTERED message structure - REGISTERED.Request must be an integer");
       }
 
-      uint64_t request_id = msg[1].as<uint64_t>();
+      quint64 request_id = msg[1].toULongLong();
 
       RegisterRequests::iterator registerRequestIterator = registerRequests.find(request_id);
 
@@ -1021,11 +913,11 @@ namespace Autobahn {
       else {
         RegisterRequest &registerRequest = registerRequestIterator.value();
 
-        if (msg[2].type != msgpack::type::POSITIVE_INTEGER) {
+        if (!isUint64(msg[2])) {
           throw protocol_error("invalid REGISTERED message structure - REGISTERED.Registration must be an integer");
         }
 
-        uint64_t registration_id = msg[2].as<uint64_t>();
+        quint64 registration_id = msg[2].toULongLong();
 
         endpoints[registration_id] = registerRequest.endpoint;
 
@@ -1038,23 +930,22 @@ namespace Autobahn {
   void Session::get_msg_header() {
     m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
 
-    uint32_t *m_buffer_msg_len_p = (uint32_t*) &m_buffer_msg_len;
+    quint32 *m_buffer_msg_len_p = (quint32*) &m_buffer_msg_len;
     m_msg_len = ntohl(*m_buffer_msg_len_p);
-//    m_msg_len = ntohl(*((uint32_t*) &m_buffer_msg_len));
+//    m_msg_len = ntohl(*((quint32*) &m_buffer_msg_len));
 
     if (m_debug) {
       qDebug() << "RX message (" << m_msg_len << " octets) ...";
     }
-
     // read actual message
-    m_unpacker.reserve_buffer(m_msg_len);
+    readBuffer.reserve(m_msg_len + 1);
     m_msg_read = 0;
     state = ReadingMessage;
   }
 
 
   void Session::get_msg_body() {
-    char *buf = m_unpacker.buffer();
+    char *buf = readBuffer.data();
     m_msg_read += m_in.read(&buf[m_msg_read], m_msg_len - m_msg_read);
     if (m_msg_read < m_msg_len) {
       return;
@@ -1063,162 +954,162 @@ namespace Autobahn {
       qDebug() << "RX message received.";
     }
     state = Started;
+    readBuffer.resize(m_msg_len);
 
-    m_unpacker.buffer_consumed(m_msg_len);
+    QTime timer;
+    timer.start();
+    QVariant nv = MsgPack::unpack(readBuffer);
+//    qDebug() << QJsonDocument::fromVariant(nv).toJson();
 
-    msgpack::unpacked result;
+    got_msg(nv);
+//    msgpack::unpacked result;
 
-    while (m_unpacker.next(&result)) {
+//    while (m_unpacker.next(&result)) {
 
-      msgpack::object obj(result.get());
+//      msgpack::object obj(result.get());
 
-      if (m_debug) {
-        qDebug() << "RX WAMP message ";
-      }
+//      if (m_debug) {
+//        qDebug() << "RX WAMP message ";
+//      }
 
-      got_msg(obj);
-    }
+//      got_msg(obj);
+//    }
   }
 
-  void Session::got_msg(const msgpack::object& obj) {
+  void Session::got_msg(const QVariant &obj) {
 
-    if (obj.type != msgpack::type::ARRAY) {
+    if (obj.type() != QVariant::List) {
       throw protocol_error("invalid message structure - message is not an array");
     }
 
-    wamp_msg_t msg;
-    obj.convert(&msg);
+    QVariantList msg = obj.toList();
 
-    if (msg.size() < 1) {
+    if (msg.length() < 1) {
       throw protocol_error("invalid message structure - missing message code");
     }
 
-    if (msg[0].type != msgpack::type::POSITIVE_INTEGER) {
+    if (!isUint64(msg[0])) {
       throw protocol_error("invalid message code type - not an integer");
     }
 
-    msg_code code = static_cast<msg_code> (msg[0].as<int>());
+    WampMsgCode code = static_cast<WampMsgCode>(msg[0].toInt());
 
     switch (code) {
-      case msg_code::HELLO:
+      case WampMsgCode::HELLO:
         throw protocol_error("received HELLO message unexpected for WAMP client roles");
 
-      case msg_code::WELCOME:
+      case WampMsgCode::WELCOME:
         process_welcome(msg);
         break;
 
-      case msg_code::ABORT:
+      case WampMsgCode::ABORT:
         qDebug() << "ABORT";
         // FIXME
         break;
 
-      case msg_code::CHALLENGE:
+      case WampMsgCode::CHALLENGE:
         throw protocol_error("received CHALLENGE message - not implemented");
 
-      case msg_code::AUTHENTICATE:
+      case WampMsgCode::AUTHENTICATE:
         throw protocol_error("received AUTHENTICATE message unexpected for WAMP client roles");
 
-      case msg_code::GOODBYE:
+      case WampMsgCode::GOODBYE:
         process_goodbye(msg);
         break;
 
-      case msg_code::HEARTBEAT:
+      case WampMsgCode::HEARTBEAT:
         // FIXME
         break;
 
-      case msg_code::ERROR:
+      case WampMsgCode::ERROR:
         process_error(msg);
         break;
 
-      case msg_code::PUBLISH:
+      case WampMsgCode::PUBLISH:
         throw protocol_error("received PUBLISH message unexpected for WAMP client roles");
 
-      case msg_code::PUBLISHED:
+      case WampMsgCode::PUBLISHED:
         // FIXME
         break;
 
-      case msg_code::SUBSCRIBE:
+      case WampMsgCode::SUBSCRIBE:
         throw protocol_error("received SUBSCRIBE message unexpected for WAMP client roles");
 
-      case msg_code::SUBSCRIBED:
+      case WampMsgCode::SUBSCRIBED:
         process_subscribed(msg);
         break;
 
-      case msg_code::UNSUBSCRIBE:
+      case WampMsgCode::UNSUBSCRIBE:
         throw protocol_error("received UNSUBSCRIBE message unexpected for WAMP client roles");
 
-      case msg_code::UNSUBSCRIBED:
+      case WampMsgCode::UNSUBSCRIBED:
         // FIXME
         break;
 
-      case msg_code::EVENT:
+      case WampMsgCode::EVENT:
         process_event(msg);
         break;
 
-      case msg_code::CALL:
+      case WampMsgCode::CALL:
         throw protocol_error("received CALL message unexpected for WAMP client roles");
 
-      case msg_code::CANCEL:
+      case WampMsgCode::CANCEL:
         throw protocol_error("received CANCEL message unexpected for WAMP client roles");
 
-      case msg_code::RESULT:
+      case WampMsgCode::RESULT:
         process_call_result(msg);
         break;
 
-      case msg_code::REGISTER:
+      case WampMsgCode::REGISTER:
         throw protocol_error("received REGISTER message unexpected for WAMP client roles");
 
-      case msg_code::REGISTERED:
+      case WampMsgCode::REGISTERED:
         process_registered(msg);
         break;
 
-      case msg_code::UNREGISTER:
+      case WampMsgCode::UNREGISTER:
         throw protocol_error("received UNREGISTER message unexpected for WAMP client roles");
 
-      case msg_code::UNREGISTERED:
+      case WampMsgCode::UNREGISTERED:
         // FIXME
         break;
 
-      case msg_code::INVOCATION:
+      case WampMsgCode::INVOCATION:
         process_invocation(msg);
         break;
 
-      case msg_code::INTERRUPT:
+      case WampMsgCode::INTERRUPT:
         throw protocol_error("received INTERRUPT message - not implemented");
 
-      case msg_code::YIELD:
+      case WampMsgCode::YIELD:
         throw protocol_error("received YIELD message unexpected for WAMP client roles");
     }
   }
 
-  void Session::send() {
-
+  void Session::send(const QVariantList &message) {
     if (!m_stopped) {
+      QByteArray msg = MsgPack::pack(message);
       if (m_debug) {
-        qDebug() << "TX message (" << m_buffer.size() << " octets) ..." ;
+        qDebug() << "TX message (" << msg.length() << " octets) ..." ;
       }
 
-      qint64 writtenLength = 0;
-      qint64 writtenData = 0;
+      int writtenLength = 0;
+      int writtenData = 0;
 
       // write message length prefix
-      uint32_t len = htonl(m_buffer.size());
+      int len = htonl(msg.length());
       writtenLength += m_out.write((char*) &len, sizeof(len));
       // write actual serialized message
-      char *b = m_buffer.data();
-      while((size_t)writtenData < m_buffer.size()) {
-        writtenData += m_out.write(&b[writtenData], m_buffer.size() - writtenData);
+      char *b = msg.data();
+      while(writtenData < msg.length()) {
+        writtenData += m_out.write(&b[writtenData], msg.length() - writtenData);
       }
-
       if (m_debug) {
-        qDebug() << "TX message sent (" << (writtenLength + writtenData) << " / " << (sizeof(len) + m_buffer.size()) << " octets)";
+        qDebug() << "TX message sent (" << (writtenLength + writtenData) << " / " << (sizeof(len) + msg.length()) << " octets)";
       }
     }
     else if (m_debug) {
-      qDebug() << "TX message skipped since session stopped (" << m_buffer.size() << " octets).";
+      qDebug() << "TX message skipped since session stopped";
     }
-
-    // clear serialization buffer
-    m_buffer.clear();
   }
 }
