@@ -97,7 +97,12 @@ namespace Autobahn {
       QVariantMap st;
       st["procedures"] = stl;
       st["totalCalls"] = totalCalls;
-      st["totalAverage"] = totalTime / totalCalls;
+      if (totalCalls) {
+        st["totalAverage"] = totalTime / totalCalls;
+      }
+      else {
+        st["totalAverage"] = 0;
+      }
       return st;
     });
   }

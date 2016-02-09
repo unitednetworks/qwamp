@@ -118,6 +118,7 @@ namespace Autobahn {
     public:
 
       enum class Transport { Msgpack, Json };
+      Q_ENUM(Transport)
 
       /**
        * Create a new WAMP session.
@@ -395,6 +396,8 @@ namespace Autobahn {
   };
 
 }
+
+Q_DECLARE_METATYPE(Autobahn::Session::Transport)
 
 #endif // AUTOBAHN_QT
 
