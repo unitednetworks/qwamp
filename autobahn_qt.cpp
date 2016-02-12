@@ -222,7 +222,8 @@ namespace Autobahn {
          timer.start();
          QByteArray argsJson = "(";
          if (args.count()) {
-           argsJson += QJsonDocument::fromVariant(QVariant(args)).toJson(QJsonDocument::Compact);
+           argsJson += QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact).mid(1);
+           argsJson.chop(1);
          }
          argsJson += ")";
          qDebug() << "Called" << qUtf8Printable(procedureName) << argsJson.constData();

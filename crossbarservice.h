@@ -133,6 +133,30 @@ class CrossbarService : public QObject {
       });
     }
 
+
+    template<template<class,class> class Map, class K, class V>
+    void registerMapResultConverter() {
+      registerResultConverter<Map<K, V>>([this](QVariant &v, const QMap<K, V> &r) {
+        static int valueType = qMetaTypeId<V>();
+        static VoidResultConverter converter = resultConverter(valueType);
+        QVariantMap m;
+        for (auto rIterator = r.begin(); rIterator != r.end(); ++rIterator) {
+          const K &k = rIterator.key();
+          const V &v = rIterator.value();
+          QVariant r;
+          if (converter) {
+            converter(r, &v);
+          }
+          else {
+            r = QVariant::fromValue(v);
+          }
+
+          m[QVariant::fromValue(k).toString()] = r;
+        }
+        v = m;
+      });
+    }
+
   protected:
     CrossbarService(Autobahn::Endpoint::Type callType = Autobahn::Endpoint::Sync);
     void registerBasicParamConverters();
