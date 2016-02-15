@@ -55,6 +55,24 @@ namespace Autobahn {
       state = Initial;
     });
 //    MsgPack::registerType(QMetaType::QDateTime, 37);
+    QObject::connect(this, &Session::joined, [this]() {
+      provide("api.getMethods", [this](const QVariantList &, const QVariantMap &) {
+        QVariantList l;
+        for (auto methodIterator = m_methods.cbegin(); methodIterator != m_methods.cend(); ++ methodIterator) {
+          QVariantMap st;
+          QVariantList ml;
+          for (const QString &method : methodIterator.value()) {
+            QVariantMap m;
+            m["name"] = method;
+            ml << m;
+          }
+          st["class"] = methodIterator.key();
+          st["methods"] = ml;
+          l << st;
+        }
+        return l;
+      });
+    });
   }
 
   Session::Session(QIODevice &inout, Session::Transport transport, bool debug_calls, bool debug) : Session(inout, inout, transport, debug_calls, debug)
@@ -213,6 +231,13 @@ namespace Autobahn {
         throw no_session_error();
      }
 
+     QStringList procedureParts = procedure.split('.');
+     if (procedureParts.count() == 1) {
+       m_methods[""] << procedure;
+     }
+     else {
+       m_methods[procedureParts[0]] << procedureParts.mid(1).join('.');
+     }
      m_request_id += 1;
      Endpoint endpoint;
      QString procedureName = makeName(procedure);

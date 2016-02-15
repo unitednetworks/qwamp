@@ -344,6 +344,8 @@ namespace Autobahn {
       bool m_goodbye_sent;
       QString m_name;
       QHash<QString, CallStatistics> m_callStatistics;
+      QMap<QString, QStringList> m_methods;
+
       EndpointWrapper endpointWrapper;
       Transport mTransport;
 
