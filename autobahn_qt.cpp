@@ -35,6 +35,62 @@
 
 namespace Autobahn {
 
+  QString HmacSHA256(const QString &secret, const QString &key) {
+    // Need to do for XOR operation. Transforms QString to unsigned char
+    QByteArray k = secret.toLatin1();
+    // Length of secret word
+    int kLength = k.length();
+
+    // Inner padding
+    QByteArray ipad;
+    // Outer padding
+    QByteArray opad;
+
+    // If secret key > 64 bytes use this to obtain sha256 key
+    if (kLength > 64) {
+      k = QCryptographicHash::hash(k, QCryptographicHash::Sha256);
+      kLength = 20;
+    }
+
+    // Fills ipad and opad with zeros
+    ipad.fill(0, 64);
+    opad.fill(0, 64);
+
+    // Copies Secret to ipad and opad
+    ipad.replace(0, kLength, k);
+    opad.replace(0, kLength, k);
+
+    // XOR operation for inner and outer pad
+    for (int i = 0; i < 64; i++) {
+      ipad[i] = ipad[i] ^ 0x36;
+      opad[i] = opad[i] ^ 0x5c;
+    }
+
+    // Stores hashed content
+    QByteArray context;
+
+    // Appends XOR:ed ipad to context
+    context.append(ipad, 64);
+    // Appends key to context
+    context.append(key);
+
+    //Hashes inner pad
+    QByteArray sha256 = QCryptographicHash::hash(context, QCryptographicHash::Sha256);
+
+    context.clear();
+    //Appends opad to context
+    context.append(opad, 64);
+    //Appends hashed inner pad to context
+    context.append(sha256);
+
+    // Hashes outerpad
+    sha256 = QCryptographicHash::hash(context, QCryptographicHash::Sha256);
+
+    // String to return hashed stuff in Base64 format
+    return sha256.toBase64();
+  }
+
+
   Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls, bool debug)
     : QObject(0),
       m_debug_calls(debug_calls),
@@ -189,7 +245,7 @@ namespace Autobahn {
     state = Initial;
   }
 
-  void Session::join(const QString& realm) {
+  void Session::join(const QString &realm, const QString &authid, const QStringList &authmethods) {
     // [HELLO, Realm|uri, Details|dict]
 
     QVariantList msg;
@@ -202,6 +258,12 @@ namespace Autobahn {
     roles["subscriber"] = QVariantMap();
     QVariantMap m;
     m["roles"] = roles;
+    if (!authid.isEmpty()) {
+      m["authid"] = authid;
+      if (!authmethods.isEmpty()) {
+        m["authmethods"] = authmethods;
+      }
+    }
     msg << m;
 
     send(msg);
@@ -221,6 +283,13 @@ namespace Autobahn {
 
     QVariantList message;
     message << static_cast<int>(WampMsgCode::SUBSCRIBE) << m_request_id << QVariantMap() << topic;
+    send(message);
+  }
+
+  void Session::authenticate(const QString &credentials)
+  {
+    QVariantList message;
+    message << static_cast<int>(WampMsgCode::AUTHENTICATE) << credentials << QVariantMap();
     send(message);
   }
 
@@ -459,6 +528,27 @@ namespace Autobahn {
     m_session_id = msg[1].toULongLong();
     mIsJoined = true;
     emit joined(m_session_id);
+  }
+
+  void Session::process_challenge(const QVariantList &msg)
+  {
+    if (msg.length() != 3) {
+      throw protocol_error("Bad challenge response");
+    }
+
+    QString method = msg[1].toString();
+    QString challengeString = msg[2].toMap()["challenge"].toString();
+    QVariantMap challengeMap = QJsonDocument::fromJson(challengeString.toUtf8()).toVariant().toMap();
+    Challenge challengeStruct;
+    challengeStruct.authid = challengeMap["authid"].toString();
+    challengeStruct.authmethod = challengeMap["authmethod"].toString();
+    challengeStruct.authprovider = challengeMap["authprovider"].toString();
+    challengeStruct.authrole = challengeMap["authrole"].toString();
+    challengeStruct.nonce = challengeMap["nonce"].toString();
+    challengeStruct.session = challengeMap["session"].toLongLong();
+    challengeStruct.timestamp = QDateTime::fromString(challengeMap["timestamp"].toString(), Qt::DateFormat::ISODate);
+
+    emit challenge(method, challengeString, challengeStruct);
   }
 
 
@@ -953,7 +1043,7 @@ namespace Autobahn {
 
         endpoints[registration_id] = registerRequest.endpoint;
 
-        emit registered(Registration(request_id, registerRequest.procedure));
+        emit registered(Registration(registration_id, registerRequest.procedure));
         registerRequests.erase(registerRequestIterator);
       }
    }
@@ -1045,12 +1135,18 @@ namespace Autobahn {
         break;
 
       case WampMsgCode::ABORT:
-        qDebug() << "ABORT";
+        if (msg[2].toString() == "wamp.error.not_authorized" ||
+            msg[2].toString() == "wamp.error.no_auth_method" ||
+            msg[2].toString() == "wamp.error.authentication_failed") {
+          throw authorization_error(msg[1].toMap()["message"].toString().toStdString());
+        }
+        qDebug() << "ABORT" << msg.mid(1);
         // FIXME
         break;
 
       case WampMsgCode::CHALLENGE:
-        throw protocol_error("received CHALLENGE message - not implemented");
+        process_challenge(msg);
+        break;
 
       case WampMsgCode::AUTHENTICATE:
         throw protocol_error("received AUTHENTICATE message unexpected for WAMP client roles");

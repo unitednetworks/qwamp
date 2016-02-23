@@ -44,6 +44,9 @@ namespace Autobahn {
       int averageTime = 0;
   };
 
+  QString HmacSHA256(const QString &secret, const QString &key);
+
+
   /// Handler type for use with nn::subscribe(const QString&, Handler)
   typedef std::function<void(const QVariantList&, const QVariantMap&)> Handler;
 
@@ -98,6 +101,16 @@ namespace Autobahn {
       QString ex;
   };
 
+  struct Challenge {
+      QString authid;
+      QString authrole;
+      QString authmethod;
+      QString authprovider;
+      QString nonce;
+      QDateTime timestamp;
+      qint64 session;
+  };
+
   /**
    * A WAMP session.
    */
@@ -105,12 +118,13 @@ namespace Autobahn {
 
       Q_OBJECT
 
-    signals:
+    Q_SIGNALS:
       void started();
       void joined(quint64);
       void left(QString);
       void subscribed(Subscription);
       void registered(Registration);
+      void challenge(const QString &, const QString &, const Challenge &);
 
     private slots:
       void readData();
@@ -185,7 +199,7 @@ namespace Autobahn {
        * @param realm The realm to join on the WAMP router connected to.
        * @return A future that resolves with the session ID when the realm was joined.
        */
-      void join(const QString &realm);
+      void join(const QString &realm, const QString &authid = QString(), const QStringList &authmethods = QStringList());
 
       inline bool isJoined() const  { return mIsJoined; }
 
@@ -207,6 +221,7 @@ namespace Autobahn {
        */
       void subscribe(const QString &topic, Handler handler);
 
+      void authenticate(const QString &credentials);
 
       /**
        * Calls a remote procedure with positional and keyword arguments.
@@ -288,6 +303,9 @@ namespace Autobahn {
 
       /// Process a WAMP HELLO message.
       void process_welcome(const QVariantList &msg);
+
+      /// Process a WAMP CHALLENGE message.
+      void process_challenge(const QVariantList &msg);
 
       /// Process a WAMP RESULT message.
       void process_call_result(const QVariantList &msg);
@@ -397,6 +415,10 @@ namespace Autobahn {
       inline no_session_error() : std::runtime_error("session not joined") {}
   };
 
+  class authorization_error : public std::runtime_error {
+    public:
+      inline authorization_error(const std::string &msg) : std::runtime_error(msg) {}
+  };
 }
 
 Q_DECLARE_METATYPE(Autobahn::Session::Transport)
