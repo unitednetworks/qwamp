@@ -1,5 +1,5 @@
-#ifndef AUTOBAHN_QT
-#define AUTOBAHN_QT
+#ifndef QWAMP_H
+#define QWAMP_H
 
 ///////////////////////////////////////////////////////////////////////////////
 //
@@ -37,7 +37,7 @@ class QIODevice;
 /**
  * Autobahn namespace.
  */
-namespace Autobahn {
+namespace QWamp {
 
   struct CallStatistics {
       int callNumber = 0;
@@ -59,7 +59,7 @@ namespace Autobahn {
     Type type;
   };
 
-  typedef std::function<QVariant(const QVariantList &, const QVariantMap &, Autobahn::Endpoint::Function)> EndpointWrapper;
+  typedef std::function<QVariant(const QVariantList &, const QVariantMap &, QWamp::Endpoint::Function)> EndpointWrapper;
 
   /// Represents a procedure registration.
   struct Registration {
@@ -421,7 +421,7 @@ namespace Autobahn {
   };
 }
 
-Q_DECLARE_METATYPE(Autobahn::Session::Transport)
+Q_DECLARE_METATYPE(QWamp::Session::Transport)
 
-#endif // AUTOBAHN_QT
+#endif // QWAMP_H
 

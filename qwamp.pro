@@ -8,24 +8,23 @@ include(../mbase/mbase.pri)
 
 QT       -= gui
 
-TARGET = autobahnqt
+TARGET = qwamp
 TEMPLATE = lib
 
 CONFIG += c++11
 
-QMAKE_CXXFLAGS += -Wno-unused-parameter   #kvuli msgpack
 QMAKE_CXXFLAGS += -pthread
 QMAKE_CXXFLAGS_DEBUG += -DDEBUG
 
 INCLUDEPATH += ../qmsgpack/src
 
 SOURCES += \
-    autobahn_qt.cpp \
-    crossbarservice.cpp
+    crossbarservice.cpp \
+    qwamp.cpp
 
 HEADERS +=\
-    autobahn_qt.h \
-    crossbarservice.h
+    crossbarservice.h \
+    qwamp.h
 
 DISTFILES += \
-    autobahnqt.pri
+    qwamp.pri

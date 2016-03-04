@@ -11,11 +11,11 @@
 QList<CrossbarService*> *CrossbarService::services = 0;
 QString CrossbarService::m_prefix;
 bool CrossbarService::m_addClassName = true;
-Autobahn::EndpointWrapper CrossbarService::commonWrapper;
+QWamp::EndpointWrapper CrossbarService::commonWrapper;
 QMap<int, CrossbarService::VoidParamConverter> CrossbarService::staticParamConverters;
 QMap<int, CrossbarService::VoidResultConverter> CrossbarService::staticResultConverters;
 
-CrossbarService::CrossbarService(Autobahn::Endpoint::Type callType) : callType(callType) {
+CrossbarService::CrossbarService(QWamp::Endpoint::Type callType) : callType(callType) {
   if (!services) {
     services = new QList<CrossbarService*>;
   }
@@ -71,7 +71,7 @@ void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &d
   res = QVariant(dateTime.toString(Qt::DateFormat::ISODate));
 }
 
-void CrossbarService::addWrapper(Autobahn::EndpointWrapper wrapper) {
+void CrossbarService::addWrapper(QWamp::EndpointWrapper wrapper) {
   wrappers.append(wrapper);
 }
 
@@ -196,7 +196,7 @@ QVariant CrossbarService::convertResult(void *result, int returnType, VoidResult
   return res;
 }
 
-void CrossbarService::registerServices(Autobahn::Session &session) {
+void CrossbarService::registerServices(QWamp::Session &session) {
   if (!services) {
     return;
   }
@@ -301,15 +301,15 @@ void CrossbarService::registerServices(Autobahn::Session &session) {
         return convertResult(result, returnType, resultConverter);
       };
 
-      Autobahn::Endpoint::Function wrappedEndpoint = endpoint;
-      for (Autobahn::EndpointWrapper wrapper : service->wrappers) {
-        Autobahn::Endpoint::Function innerEndpoint = wrappedEndpoint;
+      QWamp::Endpoint::Function wrappedEndpoint = endpoint;
+      for (QWamp::EndpointWrapper wrapper : service->wrappers) {
+        QWamp::Endpoint::Function innerEndpoint = wrappedEndpoint;
         wrappedEndpoint = [wrapper, innerEndpoint] (const QVariantList &args, const QVariantMap &kwargs) {
           return wrapper(args, kwargs, innerEndpoint);
         };
       }
       if (commonWrapper) {
-        Autobahn::Endpoint::Function innerEndpoint = wrappedEndpoint;
+        QWamp::Endpoint::Function innerEndpoint = wrappedEndpoint;
         wrappedEndpoint = [innerEndpoint] (const QVariantList &args, const QVariantMap &kwargs) {
           return commonWrapper(args, kwargs, innerEndpoint);
         };

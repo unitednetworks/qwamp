@@ -6,7 +6,7 @@
 
 #include <functional>
 
-#include "autobahn_qt.h"
+#include "qwamp.h"
 #include <qvariantmapper.h>
 
 template<class T>
@@ -71,11 +71,11 @@ class CrossbarService : public QObject {
 
     typedef std::function<void(QVariant &, const void *)> VoidResultConverter;
 
-    static void registerServices(Autobahn::Session &session);
+    static void registerServices(QWamp::Session &session);
 
     static inline const QString &getPrefix() { return m_prefix; }
     static void setPrefix(const QString &s);
-    static inline void setCommonWrapper(Autobahn::EndpointWrapper w) { commonWrapper = w; }
+    static inline void setCommonWrapper(QWamp::EndpointWrapper w) { commonWrapper = w; }
     static inline void setAddClassName(bool b)       { m_addClassName = b; }
 
     template<class T>
@@ -158,7 +158,7 @@ class CrossbarService : public QObject {
     }
 
   protected:
-    CrossbarService(Autobahn::Endpoint::Type callType = Autobahn::Endpoint::Sync);
+    CrossbarService(QWamp::Endpoint::Type callType = QWamp::Endpoint::Sync);
     void registerBasicParamConverters();
 
     template<class T>
@@ -206,7 +206,7 @@ class CrossbarService : public QObject {
 
     QString apiClassName;
 
-    void addWrapper(Autobahn::EndpointWrapper wrapper);
+    void addWrapper(QWamp::EndpointWrapper wrapper);
 
   private:
     struct Cleaner {
@@ -226,15 +226,15 @@ class CrossbarService : public QObject {
     static QList<CrossbarService*> *services;
     static QString m_prefix;
     static bool m_addClassName;
-    static Autobahn::EndpointWrapper commonWrapper;
+    static QWamp::EndpointWrapper commonWrapper;
 
     QMap<int, VoidParamConverter> paramConverters;
     QMap<int, VoidResultConverter> resultConverters;
     static QMap<int, VoidParamConverter> staticParamConverters;
     static QMap<int, VoidResultConverter> staticResultConverters;
-    QList<Autobahn::EndpointWrapper> wrappers;
+    QList<QWamp::EndpointWrapper> wrappers;
 
-    Autobahn::Endpoint::Type callType;
+    QWamp::Endpoint::Type callType;
 };
 
 template<typename T>

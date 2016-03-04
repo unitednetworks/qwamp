@@ -16,7 +16,7 @@
 //
 ///////////////////////////////////////////////////////////////////////////////
 
-#include "autobahn_qt.h"
+#include "qwamp.h"
 
 #include <exception>
 
@@ -33,7 +33,7 @@
 
 #include <arpa/inet.h>
 
-namespace Autobahn {
+namespace QWamp {
 
   QString HmacSHA256(const QString &secret, const QString &key) {
     // Need to do for XOR operation. Transforms QString to unsigned char
@@ -105,7 +105,7 @@ namespace Autobahn {
       m_goodbye_sent(false),
       mTransport(transport),
       state(Initial) {
-    connect(&m_in, &QIODevice::readyRead, this, &Autobahn::Session::readData);
+    connect(&m_in, &QIODevice::readyRead, this, &QWamp::Session::readData);
     connect(&m_in, &QIODevice::readChannelFinished, [this]() {
       m_stopped = true;
       state = Initial;
