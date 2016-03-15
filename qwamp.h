@@ -3,7 +3,7 @@
 
 ///////////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2015 Martin Spirk
+//  Copyright (C) 2016 United Networks SE
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -29,26 +29,27 @@ class QIODevice;
 
 /** \mainpage Reference Documentation
  *
- * Welcome to the reference documentation of <b>Autobahn</b>|Qt.<br>
- * For a more gentle introduction, please visit http://autobahn.ws/qt/.
+ * Welcome to the reference documentation of <b>QWamp</b>.<br>
  */
 
 
 /**
- * Autobahn namespace.
+ * QWamp namespace.
  */
 namespace QWamp {
 
+  /** statistics of calling single endpoints, statistics collection must be manually activated in session */
   struct CallStatistics {
-      int callNumber = 0;
-      int averageTime = 0;
+      int callCount = 0;      /**< number of endpoint calls since session start */
+      int averageTime = 0;    /**< average execution time of single endpoint call */
   };
 
+  /** function for calculate hash in wampcra authorization */
   QString HmacSHA256(const QString &secret, const QString &key);
 
 
-  /// Handler type for use with nn::subscribe(const QString&, Handler)
-  typedef std::function<void(const QVariantList&, const QVariantMap&)> Handler;
+  /** Handler type for use with session::subscribe(const QString&, Handler) */
+  using Handler = std::function<void(const QVariantList&, const QVariantMap&)>;
 
   /// Endpoint type for use with session::provide(const QString&, Endpoint)
   struct Endpoint {

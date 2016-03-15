@@ -6,7 +6,7 @@
 
 include(../mbase/mbase.pri)
 
-QT       -= gui
+QT -= gui
 
 TARGET = qwamp
 TEMPLATE = lib

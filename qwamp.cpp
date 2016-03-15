@@ -1,6 +1,6 @@
 ///////////////////////////////////////////////////////////////////////////////
 //
-//  Copyright (C) 2015 Martin Spirk
+//  Copyright (C) 2016 United Networks SE
 //
 //  Licensed under the Apache License, Version 2.0 (the "License");
 //  you may not use this file except in compliance with the License.
@@ -161,10 +161,10 @@ namespace QWamp {
       QVariantMap stl;
       for (const QString &key : m_callStatistics.keys()) {
         const CallStatistics &c = m_callStatistics[key];
-        totalCalls += c.callNumber;
-        totalTime += c.callNumber * c.averageTime;
+        totalCalls += c.callCount;
+        totalTime += c.callCount * c.averageTime;
         QVariantMap m;
-        m["calls"] = c.callNumber;
+        m["calls"] = c.callCount;
         m["averageTime"] = c.averageTime;
         stl[key] = m;
       }
@@ -325,9 +325,9 @@ namespace QWamp {
          int elapsed = timer.elapsed();
          qDebug() << "execution elapsed" << elapsed << "ms";
          CallStatistics &cst = m_callStatistics[procedure];
-         int tm = cst.callNumber * cst.averageTime + elapsed;
-         ++cst.callNumber;
-         cst.averageTime = tm / cst.callNumber;
+         int tm = cst.callCount * cst.averageTime + elapsed;
+         ++cst.callCount;
+         cst.averageTime = tm / cst.callCount;
          return result;
        };
        endpoint = { wrappedEndpointFunction, endpointType };
