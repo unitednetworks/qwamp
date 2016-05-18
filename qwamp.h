@@ -127,7 +127,7 @@ namespace QWamp {
       void registered(Registration);
       void challenge(const QString &, const QString &, const Challenge &);
 
-    private slots:
+    private Q_SLOTS:
       void readData();
 
     public:
@@ -181,6 +181,9 @@ namespace QWamp {
        * @param name - name of session
        */
       void setName(const QString &name);
+
+      inline bool debugCalls() const { return m_debug_calls; }
+      inline void setDebugCalls(bool b) { m_debug_calls = b; }
 
       /**
        * Start listening on the IStream provided to the constructor

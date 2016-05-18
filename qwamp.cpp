@@ -21,7 +21,7 @@
 #include <exception>
 
 #include <QCoreApplication>
-#include <QtConcurrent/QtConcurrent>
+#include <QtConcurrent>
 #include <QDebug>
 #include <QFuture>
 #include <QFutureWatcher>
@@ -163,10 +163,7 @@ namespace QWamp {
         const CallStatistics &c = m_callStatistics[key];
         totalCalls += c.callCount;
         totalTime += c.callCount * c.averageTime;
-        QVariantMap m;
-        m["calls"] = c.callCount;
-        m["averageTime"] = c.averageTime;
-        stl[key] = m;
+        stl[key] = QVariantMap{{ "calls", c.callCount }, { "averageTime", c.averageTime }};
       }
       QVariantMap st;
       st["procedures"] = stl;
@@ -269,7 +266,6 @@ namespace QWamp {
     send(msg);
   }
 
-
   void Session::subscribe(const QString &topic, Handler handler) {
 
     if (!m_session_id) {
@@ -350,6 +346,16 @@ namespace QWamp {
     }
 
     m_request_id += 1;
+
+    if (m_debug_calls) {
+      QByteArray argsJson = "(";
+      if (args.count()) {
+        argsJson += QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact).mid(1);
+        argsJson.chop(1);
+      }
+      argsJson += ")";
+      qDebug().noquote() << "Publishing" << makeName(topic) << argsJson.constData();
+    }
 
     // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
 
