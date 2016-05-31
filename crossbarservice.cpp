@@ -41,6 +41,7 @@ void CrossbarService::registerBasicParamConverters() {
   registerSimpleParamConverter<bool>(&QVariant::toBool);
   registerSimpleParamConverter<int>([](const QVariant &v) { return v.toInt(); });
   registerParamConverter<QTime>(qTimeParamConverter);
+  registerParamConverter<QDateTime>(qDateTimeParamConverter);
 
   registerResultConverter<QTime>(qTimeResultConverter);
   registerResultConverter<QDateTime>(qDateTimeResultConverter);
@@ -59,6 +60,23 @@ void CrossbarService::qTimeParamConverter(QTime &time, const QVariant &v) {
     }
     else {
       throw std::runtime_error("Bad qtime parameter");
+    }
+  }
+}
+
+void CrossbarService::qDateTimeParamConverter(QDateTime &dateTime, const QVariant &v) {
+  if (v.isNull()) {
+    dateTime = QDateTime();
+  }
+  else {
+    if (v.canConvert(QMetaType::QString)) {
+      dateTime = QDateTime::fromString(v.toString(), Qt::DateFormat::ISODate).toLocalTime();
+      if (!dateTime.isValid()) {
+        throw std::runtime_error("Invalid conversion to QDateTime");
+      }
+    }
+    else {
+      throw std::runtime_error("Bad qdatetime parameter");
     }
   }
 }

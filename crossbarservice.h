@@ -201,6 +201,7 @@ class CrossbarService : public QObject {
     }
 
     static void qTimeParamConverter(QTime &time, const QVariant &);
+    static void qDateTimeParamConverter(QDateTime &dateTime, const QVariant &v);
     static void qTimeResultConverter(QVariant &, const QTime &time);
     static void qDateTimeResultConverter(QVariant &, const QDateTime &dateTime);
 
