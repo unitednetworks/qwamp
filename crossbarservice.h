@@ -3,6 +3,7 @@
 
 #include <QObject>
 #include <QList>
+#include <QSignalSpy>
 
 #include <functional>
 
@@ -55,6 +56,23 @@ void enumConverter(T &t, const QVariant &v) {
 //  });
 //}
 
+class CrossbarService;
+
+class SignalPublisher : public QObject {
+    Q_OBJECT
+
+  public:
+    SignalPublisher(CrossbarService *service, const QString &signalName, const QString &topic, QWamp::Session &session);
+
+  public Q_SLOTS:
+    void publish();
+
+  private:
+    QString topic;
+    QWamp::Session &session;
+    QSignalSpy signalSpy;
+};
+
 class CrossbarService : public QObject {
     Q_OBJECT
 
@@ -72,6 +90,7 @@ class CrossbarService : public QObject {
     typedef std::function<void(QVariant &, const void *)> VoidResultConverter;
 
     static void registerServices(QWamp::Session &session);
+    static QString methodPublishedName(CrossbarService *service, const QString &methodName);
 
     static inline const QString &getPrefix() { return m_prefix; }
     static void setPrefix(const QString &s);

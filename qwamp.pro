@@ -6,7 +6,7 @@
 
 include(../mbase/mbase.pri)
 
-QT += concurrent
+QT += concurrent testlib
 QT -= gui
 
 TARGET = qwamp

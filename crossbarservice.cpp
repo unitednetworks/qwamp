@@ -214,36 +214,56 @@ QVariant CrossbarService::convertResult(void *result, int returnType, VoidResult
   return res;
 }
 
+QString CrossbarService::methodPublishedName(CrossbarService *service, const QString &methodName) {
+  QStringList nameParts;
+  if (!m_prefix.isEmpty()) {
+    nameParts << m_prefix;
+  }
+  if (m_addClassName) {
+    if (service->apiClassName.isEmpty()) {
+      nameParts << service->metaObject()->className();
+    }
+    else {
+      nameParts << service->apiClassName;
+    }
+  }
+  nameParts << methodName;
+  return nameParts.join(".");
+}
+
 void CrossbarService::registerServices(QWamp::Session &session) {
   if (!services) {
     return;
   }
+  const QMetaObject &metaSignalPublisher = SignalPublisher::staticMetaObject;
+  QMetaMethod metaPublish = metaSignalPublisher.method(metaSignalPublisher.indexOfSlot("publish()"));
   for (CrossbarService *service : *services) {
     const QMetaObject *metaObject = service->metaObject();
     QMap<QString, QList<int>> methods;
+    QMap<QString, QList<int>> signales;
     for (int methodOffset = metaObject->methodOffset(); methodOffset < metaObject->methodCount(); ++methodOffset) {
       QMetaMethod metaMethod = metaObject->method(methodOffset);
       if (metaMethod.access() != QMetaMethod::Public) {
         continue;
       }
-      methods[metaMethod.name()].append(methodOffset);
+      if (metaMethod.methodType() == QMetaMethod::Slot || metaMethod.methodType() == QMetaMethod::Method) {
+        methods[metaMethod.name()].append(methodOffset);
+      }
+      else if (metaMethod.methodType() == QMetaMethod::Signal) {
+        signales[metaMethod.name()].append(methodOffset);
+      }
+    }
+    for (auto signalIterator = signales.constBegin(); signalIterator != signales.constEnd(); ++signalIterator) {
+      QString crossbarTopicName = methodPublishedName(service, signalIterator.key());
+      qDebug() << "Registering" << (session.name().isEmpty() ? crossbarTopicName : session.name() + "." + crossbarTopicName) << qPrintable(signalIterator.value().count() > 1 ? ("(" + QString::number(signalIterator.value().count()) + "x)") : QString());
+      for (int signalIndex : signalIterator.value()) {
+        QString signalId = QString() + QString::number(QSIGNAL_CODE) + metaObject->method(signalIndex).methodSignature();
+        SignalPublisher *publisher = new SignalPublisher(service, signalId, crossbarTopicName, session);
+        QObject::connect(service, metaObject->method(signalIndex), publisher, metaPublish);
+      }
     }
     for (auto methodIterator = methods.constBegin(); methodIterator != methods.constEnd(); ++methodIterator) {
-
-      QStringList nameParts;
-      if (!m_prefix.isEmpty()) {
-        nameParts << m_prefix;
-      }
-      if (m_addClassName) {
-        if (service->apiClassName.isEmpty()) {
-          nameParts << metaObject->className();
-        }
-        else {
-          nameParts << service->apiClassName;
-        }
-      }
-      nameParts << methodIterator.key();
-      QString crossbarMethodName = nameParts.join(".");
+      QString crossbarMethodName = methodPublishedName(service, methodIterator.key());
       qDebug() << "Registering" << (session.name().isEmpty() ? crossbarMethodName : session.name() + "." + crossbarMethodName) << qPrintable(methodIterator.value().count() > 1 ? ("(" + QString::number(methodIterator.value().count()) + "x)") : QString());
 
       struct Method {
@@ -333,92 +353,21 @@ void CrossbarService::registerServices(QWamp::Session &session) {
         };
       }
       session.provide(crossbarMethodName, wrappedEndpoint, service->callType);
-//      if (staticWrapper) {
-//        session.provide(crossbarMethodName, [endpoint] (const QVariantList &args, const QVariantMap &kwargs) {
-//          return staticWrapper(args, kwargs, endpoint);
-//        }, service->callType);
-//      }
-//      else {
-//        session.provide(crossbarMethodName, endpoint, service->callType);
-//      }
     }
-
-//    for (int methodOffset = metaObject->methodOffset(); methodOffset < metaObject->methodCount(); ++methodOffset) {
-//      QMetaMethod metaMethod = metaObject->method(methodOffset);
-//      if (metaMethod.access() != QMetaMethod::Public) {
-//        continue;
-//      }
-//      qDebug() << methodOffset << metaMethod.methodSignature();
-//      //pokud ma fce implicitni parametry, tak se ve vyctu objevuje vicekrat, je potreba je nejak posbirat
-//      //dohromady a udelat k tomu nejaky univerzalni handler
-//      QStringList nameParts;
-//      if (!m_prefix.isEmpty()) {
-//        nameParts << m_prefix;
-//      }
-//      if (m_addClassName) {
-//        if (service->apiClassName.isEmpty()) {
-//          nameParts << metaObject->className();
-//        }
-//        else {
-//          nameParts << service->apiClassName;
-//        }
-//      }
-//      nameParts << metaMethod.name();
-//      QString crossbarMethodName = nameParts.join(".");
-//      qDebug() << "Registering" << crossbarMethodName;
-
-//      QList<VoidParamConverter> paramConverters;
-//      for (int i = 0; i < metaMethod.parameterCount(); ++i) {
-//        paramConverters.push_back(service->paramConverter(metaMethod, i));
-//      }
-//      int returnType = metaMethod.returnType();
-//      VoidResultConverter resultConverter = service->resultConverter(returnType);
-
-//      auto endpoint = [service, metaMethod, methodOffset, crossbarMethodName, paramConverters, returnType, resultConverter](const QVariantList &args, const QVariantMap &kwargs) -> QVariant {
-//        Q_UNUSED(kwargs);
-//        qDebug() << "Called" << crossbarMethodName << "with:" << args;
-//        if (metaMethod.parameterCount() != args.count()) {
-//          throw std::runtime_error("bad argument count");
-//        }
-
-//        void *result = (returnType == QMetaType::Void) ? 0 : QMetaType::create(returnType);
-//        void *param[11] = { result, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
-
-//        Cleaner cleaner([&result, &param, &returnType, &metaMethod]() {
-//          if (result) {
-//            QMetaType::destroy(returnType, result);
-//          }
-//          for (int i = 0; i < metaMethod.parameterCount(); ++i) {
-//            if (param[i + 1]) {
-//              QMetaType::destroy(metaMethod.parameterType(i), param[i + 1]);
-//            }
-//          }
-//        });
-
-//        for (int i = 0; i < args.count(); ++i) {
-//          try {
-//            param[i + 1] = convertParameter(args[i], metaMethod.parameterType(i), paramConverters[i]);
-//          }
-//          catch(const no_converter_error &) {
-//            throw std::runtime_error(QString(metaMethod.name() + ": no converter for parameter " + metaMethod.parameterNames()[i] + " to " + metaMethod.parameterTypes()[i]).toStdString());
-//          }
-//        }
-
-//        if (!service->qt_metacall(QMetaObject::InvokeMetaMethod, methodOffset, param)) {
-//          throw std::runtime_error(QString("error invoking method" + crossbarMethodName).toStdString());
-//        }
-//        return convertResult(result, returnType, resultConverter);
-//      };
-
-//      if (wrapper) {
-//        session.provide(crossbarMethodName, [endpoint] (const QVariantList &args, const QVariantMap &kwargs) {
-//          return wrapper(args, kwargs, endpoint);
-//        });
-//      }
-//      else {
-//        session.provide(crossbarMethodName, endpoint);
-//      }
-//    }
   }
 }
 
+SignalPublisher::SignalPublisher(CrossbarService *service, const QString &signalName, const QString &topic, QWamp::Session &session)
+  : QObject(service),
+    topic(topic),
+    session(session),
+    signalSpy(service, qPrintable(signalName))
+{
+}
+
+void SignalPublisher::publish()
+{
+  //still works only with basic types, mappers from CrossbarService are not supported
+  QList<QVariant> arguments = signalSpy.takeFirst();
+  session.publish(topic, arguments);
+}
