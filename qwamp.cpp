@@ -91,9 +91,9 @@ namespace QWamp {
   }
 
 
-  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls)
+  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug)
     : QObject(0),
-      m_debug_calls(debug_calls),
+      m_debug_calls(debug),
       m_stopped(false),
       m_in(in),
       m_out(out),
@@ -130,16 +130,16 @@ namespace QWamp {
     });
   }
 
-  Session::Session(QIODevice &inout, Session::Transport transport, bool debug_calls) : Session(inout, inout, transport, debug_calls)
+  Session::Session(QIODevice &inout, Session::Transport transport, bool debug) : Session(inout, inout, transport, debug)
   {
   }
 
-  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls) : Session(in, out, transport, debug_calls)
+  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug) : Session(in, out, transport, debug)
   {
     m_name = name;
   }
 
-  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug_calls) : Session(name, inout, inout, transport, debug_calls)
+  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug) : Session(name, inout, inout, transport, debug)
   {
   }
 

@@ -141,36 +141,43 @@ namespace QWamp {
       /**
        * Create a new WAMP session.
        *
-       * @param in The input stream to run this session on.
-       * @param out The output stream to run this session on.
+       * @param in - input stream to run this session on
+       * @param out - output stream to run this session on
+       * @param transport - transport type
+       * @param debug - whether log every procedure call and every published message
+       *
        */
-      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false);
+      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
        *
-       * @param inout
-       * @param transport
-       * @param debug_calls
+       * @param inout - stream to run this session on
+       * @param transport - transport type
+       * @param debug - whether log every procedure call and every published message
        */
-      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false);
+      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug = false);
 
       /**
        * Create a new named WAMP session.
        *
-       * @param in The input stream to run this session on.
-       * @param out The output stream to run this session on.
+       * @param name - session name, can be part of procedure names and topic names (like myapp.someproc())
+       * @param in - input stream to run this session on.
+       * @param out - output stream to run this session on.
+       * @param transport - transport type
+       * @param debug - whether log every procedure call and every published message
        */
-      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false);
+      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
        *
-       * @param name
-       * @param inout
-       * @param debug_calls
+       * @param name - session name, can be part of procedure names and topic names (like myapp.someproc())
+       * @param inout - stream to run this session on
+       * @param transport - transport type
+       * @param debug - whether log every procedure call and every published message
        */
-      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false);
+      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug = false);
 
       /**
        * Gets session name
@@ -179,41 +186,47 @@ namespace QWamp {
       const QString &name() const;
 
       /**
-       * Sets the session name (it appears as a prefix in published methods)
+       * Sets the session name (it appears as a prefix in published methods and topics)
        * @param name - name of session
        */
       void setName(const QString &name);
 
-      inline bool debugCalls() const { return m_debug_calls; }
-      inline void setDebugCalls(bool b) { m_debug_calls = b; }
+      /** Gets session debugging state */
+      inline bool debug() const { return m_debug_calls; }
+
+      /** Sets/unsets session debugging */
+      inline void setDebug(bool b) { m_debug_calls = b; }
 
       /**
-       * Start listening on the IStream provided to the constructor
+       * Start listening on the input stream provided to the constructor
        * of this session.
        */
       void start();
 
       /**
-       * Closes the IStream and the OStream provided to the constructor
+       * Closes the input stream and the output stream provided to the constructor
        * of this session.
        */
       void stop();
 
       /**
-       * Join a realm with this session.
+       * Join a realm with this session. On sucessfull is emitted signal "joined()"
        *
-       * @param realm The realm to join on the WAMP router connected to.
-       * @return A future that resolves with the session ID when the realm was joined.
+       * @param realm - realm to join on the WAMP router connected to
+       * @param authid - login name if required
+       * @param authmethods - list of supported methods
        */
       void join(const QString &realm, const QString &authid = QString(), const QStringList &authmethods = QStringList());
 
+      /**
+       * Whether session is already joined or not
+       */
       inline bool isJoined() const  { return mIsJoined; }
 
       /**
        * Leave the realm.
        *
        * @param reason An optional WAMP URI providing a reason for leaving.
-       * @return A future that resolves with the reason sent by the peer.
        */
       void leave(const QString &reason = QString("wamp.error.close_realm"));
 
@@ -223,7 +236,6 @@ namespace QWamp {
        *
        * @param topic The URI of the topic to subscribe to.
        * @param handler The handler that will receive events under the subscription.
-       * @return A future that resolves to a autobahn::subscription
        */
       void subscribe(const QString &topic, Handler handler);
 
@@ -235,7 +247,7 @@ namespace QWamp {
        * @param procedure The URI of the remote procedure to call.
        * @param args The positional arguments for the call.
        * @param kwargs The keyword arguments for the call.
-       * @return A future that resolves to the result of the remote procedure call.
+       * @return QVariant containing remote procedure call result.
        */
       QVariant call(const QString &procedure, const QVariantList &args = QVariantList(), const QVariantMap &kwargs = QVariantMap());
 
@@ -342,7 +354,6 @@ namespace QWamp {
       void got_msg(const QVariant &obj);
 
       bool m_debug_calls;
-      bool m_debug;
       bool m_stopped;
 
       /// Input stream this session runs on.
@@ -430,4 +441,3 @@ namespace QWamp {
 Q_DECLARE_METATYPE(QWamp::Session::Transport)
 
 #endif // QWAMP_H
-
