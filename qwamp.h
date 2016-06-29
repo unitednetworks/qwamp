@@ -60,6 +60,7 @@ namespace QWamp {
     Type type;
   };
 
+  /** Function that can be used for wrapping all endpoints, ie for some high level API implementation */
   typedef std::function<QVariant(const QVariantList &, const QVariantMap &, QWamp::Endpoint::Function)> EndpointWrapper;
 
   /// Represents a procedure registration.
@@ -70,6 +71,7 @@ namespace QWamp {
       QString procedure;
   };
 
+  /// An outstanding WAMP registration request.
   struct RegisterRequest {
       inline RegisterRequest(const QString &procedure, Endpoint endpoint) : procedure(procedure), endpoint(endpoint) {}
 
@@ -102,6 +104,7 @@ namespace QWamp {
       QString ex;
   };
 
+  /** authentication request */
   struct Challenge {
       QString authid;
       QString authrole;
@@ -141,16 +144,16 @@ namespace QWamp {
        * @param in The input stream to run this session on.
        * @param out The output stream to run this session on.
        */
-      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
+      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false);
 
       /**
        * Overloaded previous function with single in/out stream
        *
        * @param inout
+       * @param transport
        * @param debug_calls
-       * @param debug
        */
-      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
+      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false);
 
       /**
        * Create a new named WAMP session.
@@ -158,7 +161,7 @@ namespace QWamp {
        * @param in The input stream to run this session on.
        * @param out The output stream to run this session on.
        */
-      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
+      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug_calls = false);
 
       /**
        * Overloaded previous function with single in/out stream
@@ -166,9 +169,8 @@ namespace QWamp {
        * @param name
        * @param inout
        * @param debug_calls
-       * @param debug
        */
-      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false, bool debug = false);
+      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug_calls = false);
 
       /**
        * Gets session name

@@ -20,12 +20,12 @@ QMAKE_CXXFLAGS_DEBUG += -DDEBUG
 INCLUDEPATH += ../qmsgpack/src
 
 SOURCES += \
-    crossbarservice.cpp \
-    qwamp.cpp
+    qwamp.cpp \
+    crossbarcomponent.cpp
 
 HEADERS +=\
-    crossbarservice.h \
-    qwamp.h
+    qwamp.h \
+    crossbarcomponent.h
 
 DISTFILES += \
     qwamp.pri

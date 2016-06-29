@@ -91,10 +91,9 @@ namespace QWamp {
   }
 
 
-  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls, bool debug)
+  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls)
     : QObject(0),
       m_debug_calls(debug_calls),
-      m_debug(debug),
       m_stopped(false),
       m_in(in),
       m_out(out),
@@ -131,16 +130,16 @@ namespace QWamp {
     });
   }
 
-  Session::Session(QIODevice &inout, Session::Transport transport, bool debug_calls, bool debug) : Session(inout, inout, transport, debug_calls, debug)
+  Session::Session(QIODevice &inout, Session::Transport transport, bool debug_calls) : Session(inout, inout, transport, debug_calls)
   {
   }
 
-  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls, bool debug) : Session(in, out, transport, debug_calls, debug)
+  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug_calls) : Session(in, out, transport, debug_calls)
   {
     m_name = name;
   }
 
-  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug_calls, bool debug) : Session(name, inout, inout, transport, debug_calls, debug)
+  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug_calls) : Session(name, inout, inout, transport, debug_calls)
   {
   }
 
@@ -208,18 +207,12 @@ namespace QWamp {
 
   void Session::get_handshake_reply() {
     m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
-    if (m_debug) {
-      qDebug() << "RawSocket handshake reply received";
-    }
     if (m_buffer_msg_len[0] != 0x7F) {
       throw protocol_error("invalid magic byte in RawSocket handshake response");
     }
     if (((m_buffer_msg_len[1] & 0x0F) != 0x02)) {
       // FIXME: this isn't exactly a "protocol error" => invent new exception
       throw protocol_error("RawSocket handshake reply: server does not speak MsgPack encoding");
-    }
-    if (m_debug) {
-      qDebug() << "RawSocket handshake reply is valid: start WAMP message send-receive loop";
     }
 
     state = Started;
@@ -806,11 +799,6 @@ namespace QWamp {
       // [YIELD, INVOCATION.Request|id, Options|dict, Arguments|list]
       // [YIELD, INVOCATION.Request|id, Options|dict, Arguments|list, ArgumentsKw|dict]
       try {
-
-        if (m_debug) {
-          qDebug() << "Invoking endpoint registered under " << registration_id << " as of type Endpoint";
-        }
-
         if (endpoint.type == Endpoint::Sync) {
           QVariant res = endpointFunction(args, kwargs);
           send(QVariantList() << static_cast<int>(WampMsgCode::YIELD) << request_id << QVariantMap() << QVariant(QVariantList() << res));
@@ -1002,19 +990,14 @@ namespace QWamp {
         }
       }
       catch (...) {
-        if (m_debug) {
-          qDebug() << "Warning: event handler fired exception";
-        }
+        qDebug() << "Warning: event handler fired exception";
       }
-
     }
     else {
       // silently swallow EVENT for non-existent subscription IDs.
       // We may have just unsubscribed, the this EVENT might be have
       // already been in-flight.
-      if (m_debug) {
-        qDebug() << "Skipping EVENT for non-existent subscription ID " << subscription_id;
-      }
+      qDebug() << "Skipping EVENT for non-existent subscription ID " << subscription_id;
     }
   }
 
@@ -1062,9 +1045,6 @@ namespace QWamp {
     m_msg_len = ntohl(*m_buffer_msg_len_p);
 //    m_msg_len = ntohl(*((quint32*) &m_buffer_msg_len));
 
-    if (m_debug) {
-      qDebug() << "RX message (" << m_msg_len << " octets) ...";
-    }
     // read actual message
     readBuffer.reserve(m_msg_len + 1);
     m_msg_read = 0;
@@ -1077,9 +1057,6 @@ namespace QWamp {
     m_msg_read += m_in.read(&buf[m_msg_read], m_msg_len - m_msg_read);
     if (m_msg_read < m_msg_len) {
       return;
-    }
-    if (m_debug) {
-      qDebug() << "RX message received.";
     }
     state = Started;
     readBuffer.resize(m_msg_len);
@@ -1105,10 +1082,6 @@ namespace QWamp {
 //    while (m_unpacker.next(&result)) {
 
 //      msgpack::object obj(result.get());
-
-//      if (m_debug) {
-//        qDebug() << "RX WAMP message ";
-//      }
 
 //      got_msg(obj);
 //    }
@@ -1239,9 +1212,6 @@ namespace QWamp {
       else {
         msg = QJsonDocument::fromVariant(message).toJson(QJsonDocument::Compact);
       }
-      if (m_debug) {
-        qDebug() << "TX message (" << msg.length() << " octets) ..." ;
-      }
 
       int writtenLength = 0;
       int writtenData = 0;
@@ -1254,12 +1224,6 @@ namespace QWamp {
       while(writtenData < msg.length()) {
         writtenData += m_out.write(&b[writtenData], msg.length() - writtenData);
       }
-      if (m_debug) {
-        qDebug() << "TX message sent (" << (writtenLength + writtenData) << " / " << (sizeof(len) + msg.length()) << " octets)";
-      }
-    }
-    else if (m_debug) {
-      qDebug() << "TX message skipped since session stopped";
     }
   }
 }

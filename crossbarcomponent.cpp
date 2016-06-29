@@ -1,4 +1,4 @@
-#include "crossbarservice.h"
+#include "crossbarcomponent.h"
 
 #include <QDebug>
 #include <QMetaMethod>
@@ -8,34 +8,34 @@
 #include <exception>
 #include <functional>
 
-QList<CrossbarService*> *CrossbarService::services = 0;
-QString CrossbarService::m_prefix;
-bool CrossbarService::m_addClassName = true;
-QWamp::EndpointWrapper CrossbarService::commonWrapper;
-QMap<int, CrossbarService::VoidParamConverter> CrossbarService::staticParamConverters;
-QMap<int, CrossbarService::VoidResultConverter> CrossbarService::staticResultConverters;
+QList<CrossbarComponent*> *CrossbarComponent::services = 0;
+QString CrossbarComponent::m_prefix;
+bool CrossbarComponent::m_addClassName = true;
+QWamp::EndpointWrapper CrossbarComponent::commonWrapper;
+QMap<int, CrossbarComponent::VoidParamConverter> CrossbarComponent::staticParamConverters;
+QMap<int, CrossbarComponent::VoidResultConverter> CrossbarComponent::staticResultConverters;
 
-CrossbarService::CrossbarService(QWamp::Endpoint::Type callType) : callType(callType) {
+CrossbarComponent::CrossbarComponent(QWamp::Endpoint::Type callType) : callType(callType) {
   if (!services) {
-    services = new QList<CrossbarService*>;
+    services = new QList<CrossbarComponent*>;
   }
   services->append(this);
 
   registerBasicParamConverters();
 }
 
-CrossbarService::~CrossbarService() {
+CrossbarComponent::~CrossbarComponent() {
   services->removeOne(this);
   if (services->count() == 0) {
     delete services;
   }
 }
 
-void CrossbarService::setPrefix(const QString &s) {
+void CrossbarComponent::setPrefix(const QString &s) {
   m_prefix = s;
 }
 
-void CrossbarService::registerBasicParamConverters() {
+void CrossbarComponent::registerBasicParamConverters() {
   registerSimpleParamConverter<QString>(&QVariant::toString);
   registerSimpleParamConverter<QByteArray>(&QVariant::toByteArray);
   registerSimpleParamConverter<bool>(&QVariant::toBool);
@@ -47,7 +47,7 @@ void CrossbarService::registerBasicParamConverters() {
   registerResultConverter<QDateTime>(qDateTimeResultConverter);
 }
 
-void CrossbarService::qTimeParamConverter(QTime &time, const QVariant &v) {
+void CrossbarComponent::qTimeParamConverter(QTime &time, const QVariant &v) {
   if (v.isNull()) {
     time = QTime();
   }
@@ -64,7 +64,7 @@ void CrossbarService::qTimeParamConverter(QTime &time, const QVariant &v) {
   }
 }
 
-void CrossbarService::qDateTimeParamConverter(QDateTime &dateTime, const QVariant &v) {
+void CrossbarComponent::qDateTimeParamConverter(QDateTime &dateTime, const QVariant &v) {
   if (v.isNull()) {
     dateTime = QDateTime();
   }
@@ -81,19 +81,19 @@ void CrossbarService::qDateTimeParamConverter(QDateTime &dateTime, const QVarian
   }
 }
 
-void CrossbarService::qTimeResultConverter(QVariant &res, const QTime &time) {
+void CrossbarComponent::qTimeResultConverter(QVariant &res, const QTime &time) {
   res = QVariant(time.toString("HH:mm"));
 }
 
-void CrossbarService::qDateTimeResultConverter(QVariant &res, const QDateTime &dateTime) {
+void CrossbarComponent::qDateTimeResultConverter(QVariant &res, const QDateTime &dateTime) {
   res = QVariant(dateTime.toString(Qt::DateFormat::ISODate));
 }
 
-void CrossbarService::addWrapper(QWamp::EndpointWrapper wrapper) {
+void CrossbarComponent::addWrapper(QWamp::EndpointWrapper wrapper) {
   wrappers.append(wrapper);
 }
 
-CrossbarService::VoidParamConverter CrossbarService::paramConverter(const QMetaMethod &metaMethod, int i) const {
+CrossbarComponent::VoidParamConverter CrossbarComponent::paramConverter(const QMetaMethod &metaMethod, int i) const {
   int parameterType = metaMethod.parameterType(i);
   if (paramConverters.contains(parameterType)) {
     return paramConverters[parameterType];
@@ -151,7 +151,7 @@ class QEVariant : public QVariant {
     inline bool convert(const int type, void *ptr) const { return QVariant::convert(type, ptr); }
 };
 
-void *CrossbarService::convertParameter(const QVariant &arg, int parameterType, VoidParamConverter converter) {
+void *CrossbarComponent::convertParameter(const QVariant &arg, int parameterType, VoidParamConverter converter) {
   void *v = QMetaType::create(parameterType);
   try {
     if (arg.isValid()) {
@@ -173,7 +173,7 @@ void *CrossbarService::convertParameter(const QVariant &arg, int parameterType, 
   return v;
 }
 
-CrossbarService::VoidResultConverter CrossbarService::resultConverter(int returnType) const {
+CrossbarComponent::VoidResultConverter CrossbarComponent::resultConverter(int returnType) const {
   if (resultConverters.contains(returnType)) {
     return resultConverters[returnType];
   }
@@ -201,7 +201,7 @@ CrossbarService::VoidResultConverter CrossbarService::resultConverter(int return
   }
 }
 
-QVariant CrossbarService::convertResult(void *result, int returnType, VoidResultConverter converter) {
+QVariant CrossbarComponent::convertResult(void *result, int returnType, VoidResultConverter converter) {
   QVariant res;
   if (returnType != QMetaType::Void) {
     if (converter) {
@@ -214,7 +214,7 @@ QVariant CrossbarService::convertResult(void *result, int returnType, VoidResult
   return res;
 }
 
-QString CrossbarService::methodPublishedName(CrossbarService *service, const QString &methodName) {
+QString CrossbarComponent::methodPublishedName(CrossbarComponent *service, const QString &methodName) {
   QStringList nameParts;
   if (!m_prefix.isEmpty()) {
     nameParts << m_prefix;
@@ -231,13 +231,13 @@ QString CrossbarService::methodPublishedName(CrossbarService *service, const QSt
   return nameParts.join(".");
 }
 
-void CrossbarService::registerServices(QWamp::Session &session) {
+void CrossbarComponent::registerServices(QWamp::Session &session) {
   if (!services) {
     return;
   }
   const QMetaObject &metaSignalPublisher = SignalPublisher::staticMetaObject;
   QMetaMethod metaPublish = metaSignalPublisher.method(metaSignalPublisher.indexOfSlot("publish()"));
-  for (CrossbarService *service : *services) {
+  for (CrossbarComponent *service : *services) {
     const QMetaObject *metaObject = service->metaObject();
     QMap<QString, QList<int>> methods;
     QMap<QString, QList<int>> signales;
@@ -357,7 +357,7 @@ void CrossbarService::registerServices(QWamp::Session &session) {
   }
 }
 
-SignalPublisher::SignalPublisher(CrossbarService *service, const QString &signalName, const QString &topic, QWamp::Session &session)
+SignalPublisher::SignalPublisher(CrossbarComponent *service, const QString &signalName, const QString &topic, QWamp::Session &session)
   : QObject(service),
     topic(topic),
     session(session),

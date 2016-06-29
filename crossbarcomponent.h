@@ -56,13 +56,13 @@ void enumConverter(T &t, const QVariant &v) {
 //  });
 //}
 
-class CrossbarService;
+class CrossbarComponent;
 
 class SignalPublisher : public QObject {
     Q_OBJECT
 
   public:
-    SignalPublisher(CrossbarService *service, const QString &signalName, const QString &topic, QWamp::Session &session);
+    SignalPublisher(CrossbarComponent *service, const QString &signalName, const QString &topic, QWamp::Session &session);
 
   public Q_SLOTS:
     void publish();
@@ -73,11 +73,11 @@ class SignalPublisher : public QObject {
     QSignalSpy signalSpy;
 };
 
-class CrossbarService : public QObject {
+class CrossbarComponent : public QObject {
     Q_OBJECT
 
   public:
-    ~CrossbarService();
+    ~CrossbarComponent();
 
     template<class T>
     using ParamConverter = std::function<void(T &, const QVariant &)>;
@@ -90,7 +90,7 @@ class CrossbarService : public QObject {
     typedef std::function<void(QVariant &, const void *)> VoidResultConverter;
 
     static void registerServices(QWamp::Session &session);
-    static QString methodPublishedName(CrossbarService *service, const QString &methodName);
+    static QString methodPublishedName(CrossbarComponent *service, const QString &methodName);
 
     static inline const QString &getPrefix() { return m_prefix; }
     static void setPrefix(const QString &s);
@@ -177,7 +177,7 @@ class CrossbarService : public QObject {
     }
 
   protected:
-    CrossbarService(QWamp::Endpoint::Type callType = QWamp::Endpoint::Sync);
+    CrossbarComponent(QWamp::Endpoint::Type callType = QWamp::Endpoint::Sync);
     void registerBasicParamConverters();
 
     template<class T>
@@ -243,7 +243,7 @@ class CrossbarService : public QObject {
     VoidResultConverter resultConverter(int returnType) const;
     static QVariant convertResult(void *result, int returnType, VoidResultConverter converter);
 
-    static QList<CrossbarService*> *services;
+    static QList<CrossbarComponent*> *services;
     static QString m_prefix;
     static bool m_addClassName;
     static QWamp::EndpointWrapper commonWrapper;
@@ -267,7 +267,7 @@ class CrossbarEnumRegistrator {
   class CrossbarEnumRegistrator<TYPE> { \
     public:                                                        \
       CrossbarEnumRegistrator() {                                  \
-        CrossbarService::registerStaticEnumConverter<TYPE>();      \
+        CrossbarComponent::registerStaticEnumConverter<TYPE>();      \
       }                                                            \
       static CrossbarEnumRegistrator<TYPE> registrator;            \
   };                                                               \
