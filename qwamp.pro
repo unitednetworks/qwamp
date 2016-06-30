@@ -28,4 +28,5 @@ HEADERS +=\
     crossbarcomponent.h
 
 DISTFILES += \
-    qwamp.pri
+    qwamp.pri \
+    README.md
