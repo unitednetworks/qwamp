@@ -93,16 +93,16 @@ namespace QWamp {
 
   Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug)
     : QObject(0),
-      m_debug_calls(debug),
+      m_debug(debug),
       m_stopped(false),
       m_in(in),
       m_out(out),
-      mIsJoined(false),
-      m_msg_read(0),
-      m_session_id(0),
-      m_request_id(0),
-      m_goodbye_sent(false),
-      mTransport(transport),
+      m_isJoined(false),
+      m_msgRead(0),
+      m_sessionId(0),
+      m_requestId(0),
+      m_goodbyeSent(false),
+      m_transport(transport),
       state(Initial) {
     connect(&m_in, &QIODevice::readyRead, this, &QWamp::Session::readData);
     connect(&m_in, &QIODevice::readChannelFinished, [this]() {
@@ -181,23 +181,23 @@ namespace QWamp {
     // Send the initial handshake packet informing the server which
     // serialization format we wish to use, and our maximum message size
     //
-    m_buffer_msg_len[0] = 0x7F; // magic byte
-    m_buffer_msg_len[1] = 0xF2; // we are ready to receive messages up to 2**24 octets and encoded using MsgPack
-    m_buffer_msg_len[2] = 0x00; // reserved
-    m_buffer_msg_len[3] = 0x00; // reserved
-    m_out.write(m_buffer_msg_len, sizeof(m_buffer_msg_len));
+    m_bufferMsgLen[0] = 0x7F; // magic byte
+    m_bufferMsgLen[1] = 0xF2; // we are ready to receive messages up to 2**24 octets and encoded using MsgPack
+    m_bufferMsgLen[2] = 0x00; // reserved
+    m_bufferMsgLen[3] = 0x00; // reserved
+    m_out.write(m_bufferMsgLen, sizeof(m_bufferMsgLen));
   }
 
   void Session::readData() {
     while(m_in.bytesAvailable()) {
       if (state == Initial) {
-        get_handshake_reply();
+        getHandshakeReply();
       }
       else if (state == Started) {
-        get_msg_header();
+        getMsgHeader();
       }
       else {
-        get_msg_body();
+        getMsgBody();
       }
       if (m_stopped) {
         break;
@@ -205,14 +205,14 @@ namespace QWamp {
     }
   }
 
-  void Session::get_handshake_reply() {
-    m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
-    if (m_buffer_msg_len[0] != 0x7F) {
-      throw protocol_error("invalid magic byte in RawSocket handshake response");
+  void Session::getHandshakeReply() {
+    m_in.read(m_bufferMsgLen, sizeof(m_bufferMsgLen));
+    if (m_bufferMsgLen[0] != 0x7F) {
+      throw ProtocolError("invalid magic byte in RawSocket handshake response");
     }
-    if (((m_buffer_msg_len[1] & 0x0F) != 0x02)) {
+    if (((m_bufferMsgLen[1] & 0x0F) != 0x02)) {
       // FIXME: this isn't exactly a "protocol error" => invent new exception
-      throw protocol_error("RawSocket handshake reply: server does not speak MsgPack encoding");
+      throw ProtocolError("RawSocket handshake reply: server does not speak MsgPack encoding");
     }
 
     state = Started;
@@ -261,17 +261,17 @@ namespace QWamp {
 
   void Session::subscribe(const QString &topic, Handler handler) {
 
-    if (!m_session_id) {
-      throw no_session_error();
+    if (!m_sessionId) {
+      throw NoSessionError();
     }
 
     // [SUBSCRIBE, Request|id, Options|dict, Topic|uri]
 
-    m_request_id += 1;
-    subscribeRequests.insert(m_request_id, SubscribeRequest(topic, handler));
+    m_requestId += 1;
+    subscribeRequests.insert(m_requestId, SubscribeRequest(topic, handler));
 
     QVariantList message;
-    message << static_cast<int>(WampMsgCode::SUBSCRIBE) << m_request_id << QVariantMap() << topic;
+    message << static_cast<int>(WampMsgCode::SUBSCRIBE) << m_requestId << QVariantMap() << topic;
     send(message);
   }
 
@@ -285,8 +285,8 @@ namespace QWamp {
 
   void Session::provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType, const QVariantMap &options) {
 
-     if (!m_session_id) {
-        throw no_session_error();
+     if (!m_sessionId) {
+        throw NoSessionError();
      }
 
      QStringList procedureParts = procedure.split('.');
@@ -296,10 +296,10 @@ namespace QWamp {
      else {
        m_methods[procedureParts[0]] << procedureParts.mid(1).join('.');
      }
-     m_request_id += 1;
+     m_requestId += 1;
      Endpoint endpoint;
      QString procedureName = makeName(procedure);
-     if (m_debug_calls) {
+     if (m_debug) {
        Endpoint::Function wrappedEndpointFunction = [this, procedure, endpointFunction, procedureName](const QVariantList &args, const QVariantMap &kwargs)->QVariant {
          QTime timer;
          timer.start();
@@ -325,22 +325,22 @@ namespace QWamp {
        endpoint = { endpointFunction, endpointType };
      }
 
-     registerRequests.insert(m_request_id, RegisterRequest(procedureName, endpoint));
+     registerRequests.insert(m_requestId, RegisterRequest(procedureName, endpoint));
 
      // [REGISTER, Request|id, Options|dict, Procedure|uri]
-     send(QVariantList() << static_cast<int>(WampMsgCode::REGISTER) << m_request_id << options << procedureName);
+     send(QVariantList() << static_cast<int>(WampMsgCode::REGISTER) << m_requestId << options << procedureName);
   }
 
 
   void Session::publish(const QString &topic, const QVariantList &args, const QVariantMap &kwargs) {
 
-    if (!m_session_id) {
-      throw no_session_error();
+    if (!m_sessionId) {
+      throw NoSessionError();
     }
 
-    m_request_id += 1;
+    m_requestId += 1;
 
-    if (m_debug_calls) {
+    if (m_debug) {
       QByteArray argsJson = "(";
       if (args.count()) {
         argsJson += QJsonDocument::fromVariant(args).toJson(QJsonDocument::Compact).mid(1);
@@ -353,7 +353,7 @@ namespace QWamp {
     // [PUBLISH, Request|id, Options|dict, Topic|uri, Arguments|list, ArgumentsKw|dict]
 
     QVariantList message;
-    message << static_cast<int>(WampMsgCode::PUBLISH) << m_request_id << QVariantMap() << makeName(topic);
+    message << static_cast<int>(WampMsgCode::PUBLISH) << m_requestId << QVariantMap() << makeName(topic);
 
     if (args.count()) {
       message << QVariant(args);
@@ -414,16 +414,16 @@ namespace QWamp {
 
   QVariant Session::call(const QString &procedure, const QVariantList &args, const QVariantMap &kwargs) {
 
-    if (!m_session_id) {
-      throw no_session_error();
+    if (!m_sessionId) {
+      throw NoSessionError();
     }
 
-    m_request_id += 1;
-    CallRequests::iterator callRequestsIterator = callRequests.insert(m_request_id, CallRequest());
+    m_requestId += 1;
+    CallRequests::iterator callRequestsIterator = callRequests.insert(m_requestId, CallRequest());
     // [CALL, Request|id, Options|dict, Procedure|uri]
 
     QVariantList message;
-    message << static_cast<int> (WampMsgCode::CALL) << m_request_id << QVariantMap() << procedure;
+    message << static_cast<int> (WampMsgCode::CALL) << m_requestId << QVariantMap() << procedure;
     if (args.count()) {
       message << QVariant(convertParams(args));
       if (kwargs.count()) {
@@ -520,19 +520,19 @@ namespace QWamp {
 //  }
 
 
-  void Session::process_welcome(const QVariantList &msg) {
+  void Session::processWelcome(const QVariantList &msg) {
     if (msg.length() < 2) {
-      throw protocol_error("Bad welcome response");
+      throw ProtocolError("Bad welcome response");
     }
-    m_session_id = msg[1].toULongLong();
-    mIsJoined = true;
-    emit joined(m_session_id);
+    m_sessionId = msg[1].toULongLong();
+    m_isJoined = true;
+    emit joined(m_sessionId);
   }
 
-  void Session::process_challenge(const QVariantList &msg)
+  void Session::processChallenge(const QVariantList &msg)
   {
     if (msg.length() != 3) {
-      throw protocol_error("Bad challenge response");
+      throw ProtocolError("Bad challenge response");
     }
 
     QString method = msg[1].toString();
@@ -551,11 +551,11 @@ namespace QWamp {
   }
 
 
-  void Session::process_goodbye(const QVariantList &msg) {
+  void Session::processGoodbye(const QVariantList &msg) {
 
-    m_session_id = 0;
+    m_sessionId = 0;
 
-    if (!m_goodbye_sent) {
+    if (!m_goodbyeSent) {
       // if we did not initiate closing, reply ..
       // [GOODBYE, Details|dict, Reason|uri]
       send(QVariantList() << static_cast<int> (WampMsgCode::GOODBYE) << QVariantMap() << QString("wamp.error.goodbye_and_out"));
@@ -565,23 +565,23 @@ namespace QWamp {
       // is the peer reply
     }
     if (msg.length() < 3) {
-      throw protocol_error("Bad goobay response");
+      throw ProtocolError("Bad goobay response");
     }
     QString reason = msg[2].toString();
     emit left(reason);
-    m_goodbye_sent = false;
-    mIsJoined = false;
+    m_goodbyeSent = false;
+    m_isJoined = false;
  }
 
 
   void Session::leave(const QString &reason) {
 
-    if (!m_session_id) {
-      throw no_session_error();
+    if (!m_sessionId) {
+      throw NoSessionError();
     }
 
-    m_goodbye_sent = true;
-    m_session_id = 0;
+    m_goodbyeSent = true;
+    m_sessionId = 0;
 
     // [GOODBYE, Details|dict, Reason|uri]
     send(QVariantList() << static_cast<int>(WampMsgCode::GOODBYE) << QVariantMap() << reason);
@@ -643,7 +643,7 @@ namespace QWamp {
 //  }
 
 
-  void Session::process_error(const QVariantList &msg) {
+  void Session::processError(const QVariantList &msg) {
 
     // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri]
     // [ERROR, REQUEST.Type|int, REQUEST.Request|id, Details|dict, Error|uri, Arguments|list]
@@ -652,13 +652,13 @@ namespace QWamp {
     // message length
     //
     if (msg.length() != 5 && msg.length() != 6 && msg.length() != 7) {
-      throw protocol_error("invalid ERROR message structure - length must be 5, 6 or 7");
+      throw ProtocolError("invalid ERROR message structure - length must be 5, 6 or 7");
     }
 
     // REQUEST.Type|int
     //
     if (!isUint64(msg[1])) {
-      throw protocol_error("invalid ERROR message structure - REQUEST.Type must be an integer");
+      throw ProtocolError("invalid ERROR message structure - REQUEST.Type must be an integer");
     }
     WampMsgCode request_type = static_cast<WampMsgCode>(msg[1].toInt());
 
@@ -668,26 +668,26 @@ namespace QWamp {
         request_type != WampMsgCode::PUBLISH &&
         request_type != WampMsgCode::SUBSCRIBE &&
         request_type != WampMsgCode::UNSUBSCRIBE) {
-      throw protocol_error("invalid ERROR message - ERROR.Type must one of CALL, REGISTER, UNREGISTER, SUBSCRIBE, UNSUBSCRIBE");
+      throw ProtocolError("invalid ERROR message - ERROR.Type must one of CALL, REGISTER, UNREGISTER, SUBSCRIBE, UNSUBSCRIBE");
     }
 
     // REQUEST.Request|id
     //
     if (!isUint64(msg[2])) {
-      throw protocol_error("invalid ERROR message structure - REQUEST.Request must be an integer");
+      throw ProtocolError("invalid ERROR message structure - REQUEST.Request must be an integer");
     }
     quint64 request_id = msg[2].toInt();
 
     // Details
     //
     if (msg[3].type() != QVariant::Map) {
-      throw protocol_error("invalid ERROR message structure - Details must be a dictionary");
+      throw ProtocolError("invalid ERROR message structure - Details must be a dictionary");
     }
 
     // Error|uri
     //
     if (msg[4].type() != QVariant::String) {
-      throw protocol_error("invalid ERROR message - Error must be a string (URI)");
+      throw ProtocolError("invalid ERROR message - Error must be a string (URI)");
     }
     QString error = msg[4].toString();
 
@@ -695,7 +695,7 @@ namespace QWamp {
     //
     if (msg.length() > 5) {
       if (msg[5].type() != QVariant::List) {
-        throw protocol_error("invalid ERROR message structure - Arguments must be a list");
+        throw ProtocolError("invalid ERROR message structure - Arguments must be a list");
       }
     }
 
@@ -703,7 +703,7 @@ namespace QWamp {
     //
     if (msg.length() > 6) {
       if (msg[6].type() != QVariant::Map) {
-        throw protocol_error("invalid ERROR message structure - ArgumentsKw must be a dictionary");
+        throw ProtocolError("invalid ERROR message structure - ArgumentsKw must be a dictionary");
       }
     }
 
@@ -724,7 +724,7 @@ namespace QWamp {
             callIterator.value().ex = error;
           }
           else {
-            throw protocol_error("bogus ERROR message for non-pending CALL request ID");
+            throw ProtocolError("bogus ERROR message for non-pending CALL request ID");
           }
         }
         break;
@@ -735,36 +735,36 @@ namespace QWamp {
     }
   }
 
-  void Session::process_invocation(const QVariantList &msg) {
+  void Session::processInvocation(const QVariantList &msg) {
 
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict]
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list]
     // [INVOCATION, Request|id, REGISTERED.Registration|id, Details|dict, CALL.Arguments|list, CALL.ArgumentsKw|dict]
 
     if (msg.length() != 4 && msg.length() != 5 && msg.length() != 6) {
-      throw protocol_error("invalid INVOCATION message structure - length must be 4, 5 or 6");
+      throw ProtocolError("invalid INVOCATION message structure - length must be 4, 5 or 6");
     }
 
     if (!isUint64(msg[1])) {
-      throw protocol_error("invalid INVOCATION message structure - INVOCATION.Request must be an integer");
+      throw ProtocolError("invalid INVOCATION message structure - INVOCATION.Request must be an integer");
     }
     quint64 request_id = msg[1].toULongLong();
 
     if (!isUint64(msg[2])) {
-      throw protocol_error("invalid INVOCATION message structure - INVOCATION.Registration must be an integer");
+      throw ProtocolError("invalid INVOCATION message structure - INVOCATION.Registration must be an integer");
     }
     quint64 registration_id = msg[2].toULongLong();
 
     const QHash<quint64, Endpoint>::iterator endpointIterator = endpoints.find(registration_id);
 
     if (endpointIterator == endpoints.end()) {
-      throw protocol_error("bogus RESULT message for non-pending request ID");
+      throw ProtocolError("bogus RESULT message for non-pending request ID");
     }
     else {
       Endpoint endpoint = endpointIterator.value();
 
       if (msg[3].type() != QVariant::Map) {
-        throw protocol_error("invalid INVOCATION message structure - Details must be a dictionary");
+        throw ProtocolError("invalid INVOCATION message structure - Details must be a dictionary");
       }
 
       QVariantList args;
@@ -782,14 +782,14 @@ namespace QWamp {
       if (msg.length() > 4) {
 
         if (msg[4].type() != QVariant::List) {
-          throw protocol_error("invalid INVOCATION message structure - INVOCATION.Arguments must be a list");
+          throw ProtocolError("invalid INVOCATION message structure - INVOCATION.Arguments must be a list");
         }
 
         args = msg[4].toList();
 
         if (msg.length() > 5) {
           if (msg[5].type() != QVariant::Map) {
-            throw protocol_error("invalid INVOCATION message structure - INVOCATION.ArgumentsKw must be a dictionary");
+            throw ProtocolError("invalid INVOCATION message structure - INVOCATION.ArgumentsKw must be a dictionary");
           }
           kwargs = msg[5].toMap();
         }
@@ -850,18 +850,18 @@ namespace QWamp {
     }
   }
 
-  void Session::process_call_result(const QVariantList &msg) {
+  void Session::processCallResult(const QVariantList &msg) {
 
     // [RESULT, CALL.Request|id, Details|dict]
     // [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list]
     // [RESULT, CALL.Request|id, Details|dict, YIELD.Arguments|list, YIELD.ArgumentsKw|dict]
 
     if (msg.length() != 3 && msg.length() != 4 && msg.length() != 5) {
-      throw protocol_error("invalid RESULT message structure - length must be 3, 4 or 5");
+      throw ProtocolError("invalid RESULT message structure - length must be 3, 4 or 5");
     }
 
     if (!isUint64(msg[1])) {
-      throw protocol_error("invalid RESULT message structure - CALL.Request must be an integer");
+      throw ProtocolError("invalid RESULT message structure - CALL.Request must be an integer");
     }
 
     quint64 request_id = msg[1].toULongLong();
@@ -874,13 +874,13 @@ namespace QWamp {
       callRequest.ready = true;
 
       if (msg[2].type() != QVariant::Map) {
-        throw protocol_error("invalid RESULT message structure - Details must be a dictionary");
+        throw ProtocolError("invalid RESULT message structure - Details must be a dictionary");
       }
 
       if (msg.length() > 3) {
 
         if (msg[3].type() != QVariant::List) {
-          throw protocol_error("invalid RESULT message structure - YIELD.Arguments must be a list");
+          throw ProtocolError("invalid RESULT message structure - YIELD.Arguments must be a list");
         }
 
         QVariantList args = msg[3].toList();
@@ -896,16 +896,16 @@ namespace QWamp {
     return v.type() == QVariant::Int || v.type() == QVariant::LongLong || v.type() == QVariant::UInt || v.type() == QVariant::ULongLong;
   }
 
-  void Session::process_subscribed(const QVariantList &msg) {
+  void Session::processSubscribed(const QVariantList &msg) {
 
     // [SUBSCRIBED, SUBSCRIBE.Request|id, Subscription|id]
 
     if (msg.length() != 3) {
-      throw protocol_error("invalid SUBSCRIBED message structure - length must be 3");
+      throw ProtocolError("invalid SUBSCRIBED message structure - length must be 3");
     }
 
     if (!isUint64(msg[1])) {
-      throw protocol_error("invalid SUBSCRIBED message structure - SUBSCRIBED.Request must be an integer");
+      throw ProtocolError("invalid SUBSCRIBED message structure - SUBSCRIBED.Request must be an integer");
     }
 
     quint64 request_id = msg[1].toULongLong();
@@ -913,12 +913,12 @@ namespace QWamp {
     SubscribeRequests::iterator subscribeRequestIterator = subscribeRequests.find(request_id);
 
     if (subscribeRequestIterator == subscribeRequests.end()) {
-      throw protocol_error("bogus SUBSCRIBED message for non-pending request ID");
+      throw ProtocolError("bogus SUBSCRIBED message for non-pending request ID");
     }
     else {
 
       if (!isUint64(msg[2])) {
-        throw protocol_error("invalid SUBSCRIBED message structure - SUBSCRIBED.Subscription must be an integer");
+        throw ProtocolError("invalid SUBSCRIBED message structure - SUBSCRIBED.Subscription must be an integer");
       }
 
       quint64 subscription_id = msg[2].toULongLong();
@@ -934,18 +934,18 @@ namespace QWamp {
   }
 
 
-  void Session::process_event(const QVariantList &msg) {
+  void Session::processEvent(const QVariantList &msg) {
 
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict]
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list]
     // [EVENT, SUBSCRIBED.Subscription|id, PUBLISHED.Publication|id, Details|dict, PUBLISH.Arguments|list, PUBLISH.ArgumentsKw|dict]
 
     if (msg.length() != 4 && msg.length() != 5 && msg.length() != 6) {
-      throw protocol_error("invalid EVENT message structure - length must be 4, 5 or 6");
+      throw ProtocolError("invalid EVENT message structure - length must be 4, 5 or 6");
     }
 
     if (!isUint64(msg[1])) {
-      throw protocol_error("invalid EVENT message structure - SUBSCRIBED.Subscription must be an integer");
+      throw ProtocolError("invalid EVENT message structure - SUBSCRIBED.Subscription must be an integer");
     }
 
     quint64 subscription_id = msg[1].toULongLong();
@@ -961,7 +961,7 @@ namespace QWamp {
       //uint64_t publication_id = msg[2].as<uint64_t>();
 
       if (msg[3].type() != QVariant::Map) {
-        throw protocol_error("invalid EVENT message structure - Details must be a dictionary");
+        throw ProtocolError("invalid EVENT message structure - Details must be a dictionary");
       }
 
       QVariantList args;
@@ -969,13 +969,13 @@ namespace QWamp {
 
       if (msg.length() > 4) {
         if (msg[4].type() != QVariant::List) {
-          throw protocol_error("invalid EVENT message structure - EVENT.Arguments must be a list");
+          throw ProtocolError("invalid EVENT message structure - EVENT.Arguments must be a list");
         }
         args = msg[4].toList();
 
         if (msg.length() > 5) {
           if (msg[5].type() != QVariant::Map) {
-            throw protocol_error("invalid EVENT message structure - EVENT.Arguments must be a list");
+            throw ProtocolError("invalid EVENT message structure - EVENT.Arguments must be a list");
           }
           kwargs = msg[5].toMap();
         }
@@ -1002,16 +1002,16 @@ namespace QWamp {
   }
 
 
-   void Session::process_registered(const QVariantList &msg) {
+   void Session::processRegistered(const QVariantList &msg) {
 
       // [REGISTERED, REGISTER.Request|id, Registration|id]
 
       if (msg.length() != 3) {
-         throw protocol_error("invalid REGISTERED message structure - length must be 3");
+         throw ProtocolError("invalid REGISTERED message structure - length must be 3");
       }
 
       if (!isUint64(msg[1])) {
-         throw protocol_error("invalid REGISTERED message structure - REGISTERED.Request must be an integer");
+         throw ProtocolError("invalid REGISTERED message structure - REGISTERED.Request must be an integer");
       }
 
       quint64 request_id = msg[1].toULongLong();
@@ -1019,13 +1019,13 @@ namespace QWamp {
       RegisterRequests::iterator registerRequestIterator = registerRequests.find(request_id);
 
       if (registerRequestIterator == registerRequests.end()) {
-        throw protocol_error("bogus REGISTERED message for non-pending request ID");
+        throw ProtocolError("bogus REGISTERED message for non-pending request ID");
       }
       else {
         RegisterRequest &registerRequest = registerRequestIterator.value();
 
         if (!isUint64(msg[2])) {
-          throw protocol_error("invalid REGISTERED message structure - REGISTERED.Registration must be an integer");
+          throw ProtocolError("invalid REGISTERED message structure - REGISTERED.Registration must be an integer");
         }
 
         quint64 registration_id = msg[2].toULongLong();
@@ -1038,45 +1038,45 @@ namespace QWamp {
    }
 
 
-  void Session::get_msg_header() {
-    m_in.read(m_buffer_msg_len, sizeof(m_buffer_msg_len));
+  void Session::getMsgHeader() {
+    m_in.read(m_bufferMsgLen, sizeof(m_bufferMsgLen));
 
-    quint32 *m_buffer_msg_len_p = (quint32*) &m_buffer_msg_len;
-    m_msg_len = ntohl(*m_buffer_msg_len_p);
+    quint32 *m_buffer_msg_len_p = (quint32*) &m_bufferMsgLen;
+    m_msgLen = ntohl(*m_buffer_msg_len_p);
 //    m_msg_len = ntohl(*((quint32*) &m_buffer_msg_len));
 
     // read actual message
-    readBuffer.reserve(m_msg_len + 1);
-    m_msg_read = 0;
+    readBuffer.reserve(m_msgLen + 1);
+    m_msgRead = 0;
     state = ReadingMessage;
   }
 
 
-  void Session::get_msg_body() {
+  void Session::getMsgBody() {
     char *buf = readBuffer.data();
-    m_msg_read += m_in.read(&buf[m_msg_read], m_msg_len - m_msg_read);
-    if (m_msg_read < m_msg_len) {
+    m_msgRead += m_in.read(&buf[m_msgRead], m_msgLen - m_msgRead);
+    if (m_msgRead < m_msgLen) {
       return;
     }
     state = Started;
-    readBuffer.resize(m_msg_len);
+    readBuffer.resize(m_msgLen);
 
     QTime timer;
     timer.start();
     QVariant nv;
-    if (mTransport == Transport::Msgpack) {
+    if (m_transport == Transport::Msgpack) {
       nv = MsgPack::unpack(readBuffer);
     }
     else {
       QJsonParseError parseError;
       nv = QJsonDocument::fromJson(readBuffer, &parseError).toVariant();
       if (parseError.error != QJsonParseError::NoError) {
-        throw protocol_error(parseError.errorString().toStdString());
+        throw ProtocolError(parseError.errorString());
       }
     }
 //    qDebug() << QJsonDocument::fromVariant(nv).toJson();
 
-    got_msg(nv);
+    gotMsg(nv);
 //    msgpack::unpacked result;
 
 //    while (m_unpacker.next(&result)) {
@@ -1087,51 +1087,51 @@ namespace QWamp {
 //    }
   }
 
-  void Session::got_msg(const QVariant &obj) {
+  void Session::gotMsg(const QVariant &obj) {
 
     if (obj.type() != QVariant::List) {
-      throw protocol_error("invalid message structure - message is not an array");
+      throw ProtocolError("invalid message structure - message is not an array");
     }
 
     QVariantList msg = obj.toList();
 
     if (msg.length() < 1) {
-      throw protocol_error("invalid message structure - missing message code");
+      throw ProtocolError("invalid message structure - missing message code");
     }
 
     if (!isUint64(msg[0])) {
-      throw protocol_error("invalid message code type - not an integer");
+      throw ProtocolError("invalid message code type - not an integer");
     }
 
     WampMsgCode code = static_cast<WampMsgCode>(msg[0].toInt());
 
     switch (code) {
       case WampMsgCode::HELLO:
-        throw protocol_error("received HELLO message unexpected for WAMP client roles");
+        throw ProtocolError("received HELLO message unexpected for WAMP client roles");
 
       case WampMsgCode::WELCOME:
-        process_welcome(msg);
+        processWelcome(msg);
         break;
 
       case WampMsgCode::ABORT:
         if (msg[2].toString() == "wamp.error.not_authorized" ||
             msg[2].toString() == "wamp.error.no_auth_method" ||
             msg[2].toString() == "wamp.error.authentication_failed") {
-          throw authorization_error(msg[1].toMap()["message"].toString().toStdString());
+          throw AuthorizationError(msg[1].toMap()["message"].toString());
         }
         qDebug() << "ABORT" << msg.mid(1);
         // FIXME
         break;
 
       case WampMsgCode::CHALLENGE:
-        process_challenge(msg);
+        processChallenge(msg);
         break;
 
       case WampMsgCode::AUTHENTICATE:
-        throw protocol_error("received AUTHENTICATE message unexpected for WAMP client roles");
+        throw ProtocolError("received AUTHENTICATE message unexpected for WAMP client roles");
 
       case WampMsgCode::GOODBYE:
-        process_goodbye(msg);
+        processGoodbye(msg);
         break;
 
       case WampMsgCode::HEARTBEAT:
@@ -1139,74 +1139,74 @@ namespace QWamp {
         break;
 
       case WampMsgCode::ERROR:
-        process_error(msg);
+        processError(msg);
         break;
 
       case WampMsgCode::PUBLISH:
-        throw protocol_error("received PUBLISH message unexpected for WAMP client roles");
+        throw ProtocolError("received PUBLISH message unexpected for WAMP client roles");
 
       case WampMsgCode::PUBLISHED:
         // FIXME
         break;
 
       case WampMsgCode::SUBSCRIBE:
-        throw protocol_error("received SUBSCRIBE message unexpected for WAMP client roles");
+        throw ProtocolError("received SUBSCRIBE message unexpected for WAMP client roles");
 
       case WampMsgCode::SUBSCRIBED:
-        process_subscribed(msg);
+        processSubscribed(msg);
         break;
 
       case WampMsgCode::UNSUBSCRIBE:
-        throw protocol_error("received UNSUBSCRIBE message unexpected for WAMP client roles");
+        throw ProtocolError("received UNSUBSCRIBE message unexpected for WAMP client roles");
 
       case WampMsgCode::UNSUBSCRIBED:
         // FIXME
         break;
 
       case WampMsgCode::EVENT:
-        process_event(msg);
+        processEvent(msg);
         break;
 
       case WampMsgCode::CALL:
-        throw protocol_error("received CALL message unexpected for WAMP client roles");
+        throw ProtocolError("received CALL message unexpected for WAMP client roles");
 
       case WampMsgCode::CANCEL:
-        throw protocol_error("received CANCEL message unexpected for WAMP client roles");
+        throw ProtocolError("received CANCEL message unexpected for WAMP client roles");
 
       case WampMsgCode::RESULT:
-        process_call_result(msg);
+        processCallResult(msg);
         break;
 
       case WampMsgCode::REGISTER:
-        throw protocol_error("received REGISTER message unexpected for WAMP client roles");
+        throw ProtocolError("received REGISTER message unexpected for WAMP client roles");
 
       case WampMsgCode::REGISTERED:
-        process_registered(msg);
+        processRegistered(msg);
         break;
 
       case WampMsgCode::UNREGISTER:
-        throw protocol_error("received UNREGISTER message unexpected for WAMP client roles");
+        throw ProtocolError("received UNREGISTER message unexpected for WAMP client roles");
 
       case WampMsgCode::UNREGISTERED:
         // FIXME
         break;
 
       case WampMsgCode::INVOCATION:
-        process_invocation(msg);
+        processInvocation(msg);
         break;
 
       case WampMsgCode::INTERRUPT:
-        throw protocol_error("received INTERRUPT message - not implemented");
+        throw ProtocolError("received INTERRUPT message - not implemented");
 
       case WampMsgCode::YIELD:
-        throw protocol_error("received YIELD message unexpected for WAMP client roles");
+        throw ProtocolError("received YIELD message unexpected for WAMP client roles");
     }
   }
 
   void Session::send(const QVariantList &message) {
     if (!m_stopped) {
       QByteArray msg;
-      if (mTransport == Transport::Msgpack) {
+      if (m_transport == Transport::Msgpack) {
         msg = MsgPack::pack(message);
       }
       else {

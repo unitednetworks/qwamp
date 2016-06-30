@@ -192,10 +192,10 @@ namespace QWamp {
       void setName(const QString &name);
 
       /** Gets session debugging state */
-      inline bool debug() const { return m_debug_calls; }
+      inline bool debug() const { return m_debug; }
 
       /** Sets/unsets session debugging */
-      inline void setDebug(bool b) { m_debug_calls = b; }
+      inline void setDebug(bool b) { m_debug = b; }
 
       /**
        * Start listening on the input stream provided to the constructor
@@ -221,7 +221,7 @@ namespace QWamp {
       /**
        * Whether session is already joined or not
        */
-      inline bool isJoined() const  { return mIsJoined; }
+      inline bool isJoined() const  { return m_isJoined; }
 
       /**
        * Leave the realm.
@@ -317,43 +317,43 @@ namespace QWamp {
       Endpoints endpoints;
 
       /// Process a WAMP ERROR message.
-      void process_error(const QVariantList &msg);
+      void processError(const QVariantList &msg);
 
       /// Process a WAMP HELLO message.
-      void process_welcome(const QVariantList &msg);
+      void processWelcome(const QVariantList &msg);
 
       /// Process a WAMP CHALLENGE message.
-      void process_challenge(const QVariantList &msg);
+      void processChallenge(const QVariantList &msg);
 
       /// Process a WAMP RESULT message.
-      void process_call_result(const QVariantList &msg);
+      void processCallResult(const QVariantList &msg);
 
       /// Process a WAMP SUBSCRIBED message.
-      void process_subscribed(const QVariantList &msg);
+      void processSubscribed(const QVariantList &msg);
 
       /// Process a WAMP EVENT message.
-      void process_event(const QVariantList &msg);
+      void processEvent(const QVariantList &msg);
 
       /// Process a WAMP REGISTERED message.
-      void process_registered(const QVariantList &msg);
+      void processRegistered(const QVariantList &msg);
 
       /// Process a WAMP INVOCATION message.
-      void process_invocation(const QVariantList &msg);
+      void processInvocation(const QVariantList &msg);
 
       /// Process a WAMP GOODBYE message.
-      void process_goodbye(const QVariantList &msg);
+      void processGoodbye(const QVariantList &msg);
 
 
       /// Send out message serialized in serialization buffer to ostream.
       void send(const QVariantList &message);
 
-      void get_handshake_reply();
-      void get_msg_header();
-      void get_msg_body();
+      void getHandshakeReply();
+      void getMsgHeader();
+      void getMsgBody();
 
-      void got_msg(const QVariant &obj);
+      void gotMsg(const QVariant &obj);
 
-      bool m_debug_calls;
+      bool m_debug;
       bool m_stopped;
 
       /// Input stream this session runs on.
@@ -362,27 +362,27 @@ namespace QWamp {
       /// Output stream this session runs on.
       QIODevice &m_out;
 
-      bool mIsJoined;
-      char m_buffer_msg_len[4];
-      quint32 m_msg_len;
-      quint32 m_msg_read;
+      bool m_isJoined;
+      char m_bufferMsgLen[4];
+      quint32 m_msgLen;
+      quint32 m_msgRead;
 
       /// MsgPack serialization buffer.
       QByteArray readBuffer;
 
       /// WAMP session ID (if the session is joined to a realm).
-      quint64 m_session_id;
+      quint64 m_sessionId;
 
       /// Last request ID of outgoing WAMP requests.
-      quint64 m_request_id;
+      quint64 m_requestId;
 
-      bool m_goodbye_sent;
+      bool m_goodbyeSent;
       QString m_name;
       QHash<QString, CallStatistics> m_callStatistics;
       QMap<QString, QStringList> m_methods;
 
       EndpointWrapper endpointWrapper;
-      Transport mTransport;
+      Transport m_transport;
 
       enum State {
         Initial,
@@ -422,19 +422,19 @@ namespace QWamp {
       };
   };
 
-  class protocol_error : public std::runtime_error {
+  class ProtocolError : public std::runtime_error {
     public:
-      inline protocol_error(const std::string &msg) : std::runtime_error(msg) {}
+      inline ProtocolError(const QString &msg) : std::runtime_error(msg.toStdString()) {}
   };
 
-  class no_session_error : public std::runtime_error {
+  class NoSessionError : public std::runtime_error {
     public:
-      inline no_session_error() : std::runtime_error("session not joined") {}
+      inline NoSessionError() : std::runtime_error("session not joined") {}
   };
 
-  class authorization_error : public std::runtime_error {
+  class AuthorizationError : public std::runtime_error {
     public:
-      inline authorization_error(const std::string &msg) : std::runtime_error(msg) {}
+      inline AuthorizationError(const QString &msg) : std::runtime_error(msg.toStdString()) {}
   };
 }
 
