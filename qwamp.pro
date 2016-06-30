@@ -4,7 +4,6 @@
 #
 #-------------------------------------------------
 
-include(../mbase/mbase.pri)
 
 QT += concurrent testlib
 QT -= gui
@@ -20,12 +19,10 @@ QMAKE_CXXFLAGS_DEBUG += -DDEBUG
 INCLUDEPATH += ../qmsgpack/src
 
 SOURCES += \
-    qwamp.cpp \
-    crossbarcomponent.cpp
+    qwamp.cpp
 
 HEADERS +=\
-    qwamp.h \
-    crossbarcomponent.h
+    qwamp.h
 
 DISTFILES += \
     qwamp.pri \
