@@ -32,6 +32,7 @@
 #include <msgpack.h>
 
 #include <arpa/inet.h>
+#include <string.h>
 
 namespace QWamp {
 
@@ -91,56 +92,72 @@ namespace QWamp {
   }
 
 
-  Session::Session(QIODevice &in, QIODevice &out, Session::Transport transport, bool debug)
+  Session::Session(QIODevice &in, QIODevice &out, Session::MessageFormat messageFormat, bool debug)
     : QObject(0),
       m_debug(debug),
       m_stopped(false),
       m_in(in),
       m_out(out),
+      m_websocket(*(QWebSocket *)0),
       m_isJoined(false),
       m_msgRead(0),
       m_sessionId(0),
       m_requestId(0),
       m_goodbyeSent(false),
-      m_transport(transport),
+      m_messageFormat(messageFormat),
+      m_transportType(TransportType::RawSocket),
       state(Initial) {
     connect(&m_in, &QIODevice::readyRead, this, &QWamp::Session::readData);
     connect(&m_in, &QIODevice::readChannelFinished, [this]() {
       m_stopped = true;
       state = Initial;
     });
-//    MsgPack::registerType(QMetaType::QDateTime, 37);
-    QObject::connect(this, &Session::joined, [this]() {
-      provide("api.getMethods", [this](const QVariantList &, const QVariantMap &) {
-        QVariantList l;
-        for (auto methodIterator = m_methods.cbegin(); methodIterator != m_methods.cend(); ++ methodIterator) {
-          QVariantMap st;
-          QVariantList ml;
-          for (const QString &method : methodIterator.value()) {
-            QVariantMap m;
-            m["name"] = method;
-            ml << m;
-          }
-          st["class"] = methodIterator.key();
-          st["methods"] = ml;
-          l << st;
-        }
-        return l;
-      });
-    });
+    init();
   }
 
-  Session::Session(QIODevice &inout, Session::Transport transport, bool debug) : Session(inout, inout, transport, debug)
+  void Session::init()
   {
   }
 
-  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::Transport transport, bool debug) : Session(in, out, transport, debug)
+  Session::Session(QIODevice &inout, Session::MessageFormat transport, bool debug) : Session(inout, inout, transport, debug)
+  {
+  }
+
+  Session::Session(const QString &name, QIODevice &in, QIODevice &out, Session::MessageFormat transport, bool debug) : Session(in, out, transport, debug)
   {
     m_name = name;
   }
 
-  Session::Session(const QString &name, QIODevice &inout, Session::Transport transport, bool debug) : Session(name, inout, inout, transport, debug)
+  Session::Session(const QString &name, QIODevice &inout, Session::MessageFormat transport, bool debug) : Session(name, inout, inout, transport, debug)
   {
+  }
+
+  Session::Session(QWebSocket &websocket, Session::MessageFormat messageFormat, bool debug)
+    : QObject(0),
+      m_debug(debug),
+      m_stopped(false),
+      m_in(*(QIODevice *)0),
+      m_out(*(QIODevice *)0),
+      m_websocket(websocket),
+      m_isJoined(false),
+      m_msgRead(0),
+      m_sessionId(0),
+      m_requestId(0),
+      m_goodbyeSent(false),
+      m_messageFormat(messageFormat),
+      m_transportType(TransportType::WebSocket),
+      state(Initial) {
+    connect(&m_websocket, &QWebSocket::readChannelFinished, [this]() {
+      m_stopped = true;
+      state = Initial;
+    });
+    connect(&m_websocket, &QWebSocket::textMessageReceived, this, &QWamp::Session::readMessage);
+    init();
+  }
+
+  Session::Session(const QString &name, QWebSocket &websocket, Session::MessageFormat messageFormat, bool debug) : Session(websocket, messageFormat, debug)
+  {
+    m_name = name;
   }
 
   const QString &Session::name() const
@@ -151,6 +168,25 @@ namespace QWamp {
   void Session::setName(const QString &name)
   {
     m_name = name;
+  }
+
+  void Session::provideGetMethods() {
+    provide("api.getMethods", [this](const QVariantList &, const QVariantMap &) {
+      QVariantList l;
+      for (auto methodIterator = m_methods.cbegin(); methodIterator != m_methods.cend(); ++ methodIterator) {
+        QVariantMap st;
+        QVariantList ml;
+        for (const QString &method : methodIterator.value()) {
+          QVariantMap m;
+          m["name"] = method;
+          ml << m;
+        }
+        st["class"] = methodIterator.key();
+        st["methods"] = ml;
+        l << st;
+      }
+      return l;
+    });
   }
 
   void Session::provideStatistics() {
@@ -178,14 +214,20 @@ namespace QWamp {
   }
 
   void Session::start() {
-    // Send the initial handshake packet informing the server which
-    // serialization format we wish to use, and our maximum message size
-    //
-    m_bufferMsgLen[0] = 0x7F; // magic byte
-    m_bufferMsgLen[1] = 0xF2; // we are ready to receive messages up to 2**24 octets and encoded using MsgPack
-    m_bufferMsgLen[2] = 0x00; // reserved
-    m_bufferMsgLen[3] = 0x00; // reserved
-    m_out.write(m_bufferMsgLen, sizeof(m_bufferMsgLen));
+    if (m_transportType == TransportType::RawSocket) {
+      // Send the initial handshake packet informing the server which
+      // serialization format we wish to use, and our maximum message size
+      //
+      m_bufferMsgLen[0] = 0x7F; // magic byte
+      m_bufferMsgLen[1] = 0xF2; // we are ready to receive messages up to 2**24 octets and encoded using MsgPack
+      m_bufferMsgLen[2] = 0x00; // reserved
+      m_bufferMsgLen[3] = 0x00; // reserved
+      m_out.write(m_bufferMsgLen, sizeof(m_bufferMsgLen));
+    }
+    else {
+      state = State::Started;
+      Q_EMIT started();
+    }
   }
 
   void Session::readData() {
@@ -205,6 +247,25 @@ namespace QWamp {
     }
   }
 
+  void Session::readMessage(const QString &msg) {
+    static int firstMessageLength = -1;   //ugly hack for probably QWebSocket bug, which first emits signal
+    QString message = msg;                //with hello message and then with hello message joined with the
+    if (firstMessageLength == -1) {       //following one
+      firstMessageLength = msg.length();
+    }
+    else if (firstMessageLength) {
+      message = message.mid(firstMessageLength);
+      firstMessageLength = 0;
+    }
+    QVariant nv;
+    QJsonParseError parseError;
+    nv = QJsonDocument::fromJson(message.toUtf8(), &parseError).toVariant();
+    if (parseError.error != QJsonParseError::NoError) {
+      throw ProtocolError(parseError.errorString());
+    }
+    gotMsg(nv);
+  }
+
   void Session::getHandshakeReply() {
     m_in.read(m_bufferMsgLen, sizeof(m_bufferMsgLen));
     if (m_bufferMsgLen[0] != 0x7F) {
@@ -216,8 +277,7 @@ namespace QWamp {
     }
 
     state = Started;
-
-    emit started();
+    Q_EMIT started();
   }
 
   void Session::stop() {
@@ -430,36 +490,57 @@ namespace QWamp {
         message << kwargs;
       }
     }
-    send(message);
-
     CallRequest &callRequest = callRequestsIterator.value();
-    while (true){
-      if (!m_in.waitForReadyRead(30000)) {  //TODO handle timout as exception
-        QVariantMap resultMap;
-        QVariantMap exception;
-        exception["what"] = "error ocured during waiting for call response";
-        resultMap["exception"] = exception;
-        return resultMap;
-      }
-      readData();
 
-//      QCoreApplication::processEvents(); //to call readData by signal
-      if (callRequest.ready) {           //add exception handling
-        QVariant result;
-        if (!callRequest.ex.isEmpty()) {
-          QVariantMap resultMap;
-          QVariantMap exception;
-          exception["what"] = callRequest.ex;
-          resultMap["exception"] = exception;
-          result = resultMap;
+    if (m_transportType == TransportType::WebSocket) {
+      QEventLoop responseLoop;
+      QObject::connect(&m_websocket, &QWebSocket::textMessageReceived, [&responseLoop]() {
+        responseLoop.exit();
+      });
+      send(message);
+      while (true) {
+        responseLoop.exec();
+        QCoreApplication::processEvents();
+        if (callRequest.ready) {           //add exception handling
+          break;
         }
-        else {
-          result = callRequest.result;
-        }
-        callRequests.erase(callRequestsIterator);
-        return result;
       }
     }
+    else { //m_transportType == TransportType::RawSocket
+      send(message);
+      while (true){
+        if (!m_in.waitForReadyRead(30000)) {  //TODO handle timout as exception
+          break;
+        }
+        readData();
+  //      QCoreApplication::processEvents(); //to call readData by signal
+        if (callRequest.ready) {           //add exception handling
+          break;
+        }
+      }
+    }
+    QVariant result;
+    if (callRequest.ready) {
+      if (!callRequest.ex.isEmpty()) {
+        QVariantMap resultMap;
+        QVariantMap exception;
+        exception["what"] = callRequest.ex;
+        resultMap["exception"] = exception;
+        result = resultMap;
+      }
+      else {
+        result = callRequest.result;
+      }
+    }
+    else {
+      QVariantMap resultMap;
+      QVariantMap exception;
+      exception["what"] = "error ocured during waiting for call response";
+      resultMap["exception"] = exception;
+      result = resultMap;
+    }
+    callRequests.erase(callRequestsIterator);
+    return result;
   }
 
 
@@ -526,7 +607,7 @@ namespace QWamp {
     }
     m_sessionId = msg[1].toULongLong();
     m_isJoined = true;
-    emit joined(m_sessionId);
+    Q_EMIT joined(m_sessionId);
   }
 
   void Session::processChallenge(const QVariantList &msg)
@@ -547,7 +628,7 @@ namespace QWamp {
     challengeStruct.session = challengeMap["session"].toLongLong();
     challengeStruct.timestamp = QDateTime::fromString(challengeMap["timestamp"].toString(), Qt::DateFormat::ISODate);
 
-    emit challenge(method, challengeString, challengeStruct);
+    Q_EMIT challenge(method, challengeString, challengeStruct);
   }
 
 
@@ -568,7 +649,7 @@ namespace QWamp {
       throw ProtocolError("Bad goobay response");
     }
     QString reason = msg[2].toString();
-    emit left(reason);
+    Q_EMIT left(reason);
     m_goodbyeSent = false;
     m_isJoined = false;
  }
@@ -676,7 +757,7 @@ namespace QWamp {
     if (!isUint64(msg[2])) {
       throw ProtocolError("invalid ERROR message structure - REQUEST.Request must be an integer");
     }
-    quint64 request_id = msg[2].toInt();
+    quint64 request_id = msg[2].toULongLong();
 
     // Details
     //
@@ -893,7 +974,7 @@ namespace QWamp {
   }
 
   bool Session::isUint64(const QVariant &v) {
-    return v.type() == QVariant::Int || v.type() == QVariant::LongLong || v.type() == QVariant::UInt || v.type() == QVariant::ULongLong;
+    return v.type() == QVariant::Int || v.type() == QVariant::LongLong || v.type() == QVariant::UInt || v.type() == QVariant::ULongLong || v.type() == QVariant::Double;
   }
 
   void Session::processSubscribed(const QVariantList &msg) {
@@ -926,7 +1007,7 @@ namespace QWamp {
       SubscribeRequest &subscribeRequest = subscribeRequestIterator.value();
 
       handlers.insert(subscription_id, subscribeRequest.handler);
-      emit subscribed(Subscription(subscription_id, subscribeRequest.topic));
+      Q_EMIT subscribed(Subscription(subscription_id, subscribeRequest.topic));
 
       subscribeRequests.erase(subscribeRequestIterator);
 
@@ -1032,7 +1113,7 @@ namespace QWamp {
 
         endpoints[registration_id] = registerRequest.endpoint;
 
-        emit registered(Registration(registration_id, registerRequest.procedure));
+        Q_EMIT registered(Registration(registration_id, registerRequest.procedure));
         registerRequests.erase(registerRequestIterator);
       }
    }
@@ -1061,10 +1142,8 @@ namespace QWamp {
     state = Started;
     readBuffer.resize(m_msgLen);
 
-    QTime timer;
-    timer.start();
     QVariant nv;
-    if (m_transport == Transport::Msgpack) {
+    if (m_messageFormat == MessageFormat::Msgpack) {
       nv = MsgPack::unpack(readBuffer);
     }
     else {
@@ -1206,23 +1285,28 @@ namespace QWamp {
   void Session::send(const QVariantList &message) {
     if (!m_stopped) {
       QByteArray msg;
-      if (m_transport == Transport::Msgpack) {
+      if (m_messageFormat == MessageFormat::Msgpack) {
         msg = MsgPack::pack(message);
       }
       else {
         msg = QJsonDocument::fromVariant(message).toJson(QJsonDocument::Compact);
       }
 
-      int writtenLength = 0;
-      int writtenData = 0;
+      if (m_transportType == TransportType::RawSocket) {
+        int writtenLength = 0;
+        int writtenData = 0;
 
-      // write message length prefix
-      int len = htonl(msg.length());
-      writtenLength += m_out.write((char*) &len, sizeof(len));
-      // write actual serialized message
-      char *b = msg.data();
-      while(writtenData < msg.length()) {
-        writtenData += m_out.write(&b[writtenData], msg.length() - writtenData);
+        // write message length prefix
+        int len = htonl(msg.length());
+        writtenLength += m_out.write((char*) &len, sizeof(len));
+        // write actual serialized message
+        char *b = msg.data();
+        while(writtenData < msg.length()) {
+          writtenData += m_out.write(&b[writtenData], msg.length() - writtenData);
+        }
+      }
+      else {
+        m_websocket.sendTextMessage(msg);
       }
     }
   }
