@@ -22,6 +22,7 @@
 #include <QMetaMethod>
 #include <QTime>
 #include <QVariant>
+#include <QWebSocket>
 
 #include <functional>
 
@@ -31,7 +32,6 @@ class QIODevice;
  *
  * Welcome to the reference documentation of <b>QWamp</b>.<br>
  */
-
 
 /**
  * QWamp namespace.
@@ -132,11 +132,14 @@ namespace QWamp {
 
     private Q_SLOTS:
       void readData();
+      void readMessage(const QString &message);
 
     public:
 
-      enum class Transport { Msgpack, Json };
-      Q_ENUM(Transport)
+      enum class MessageFormat { Msgpack, Json };
+      Q_ENUM(MessageFormat)
+      enum class TransportType { WebSocket, RawSocket };
+      Q_ENUM(TransportType)
 
       /**
        * Create a new WAMP session.
@@ -147,7 +150,7 @@ namespace QWamp {
        * @param debug - whether log every procedure call and every published message
        *
        */
-      Session(QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug = false);
+      Session(QIODevice &in, QIODevice &out, MessageFormat messageFormat = MessageFormat::Msgpack, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
@@ -156,7 +159,7 @@ namespace QWamp {
        * @param transport - transport type
        * @param debug - whether log every procedure call and every published message
        */
-      Session(QIODevice &inout, Transport transport = Transport::Msgpack, bool debug = false);
+      Session(QIODevice &inout, MessageFormat transport = MessageFormat::Msgpack, bool debug = false);
 
       /**
        * Create a new named WAMP session.
@@ -167,7 +170,7 @@ namespace QWamp {
        * @param transport - transport type
        * @param debug - whether log every procedure call and every published message
        */
-      Session(const QString &name, QIODevice &in, QIODevice &out, Transport transport = Transport::Msgpack, bool debug = false);
+      Session(const QString &name, QIODevice &in, QIODevice &out, MessageFormat transport = MessageFormat::Msgpack, bool debug = false);
 
       /**
        * Overloaded previous function with single in/out stream
@@ -177,7 +180,10 @@ namespace QWamp {
        * @param transport - transport type
        * @param debug - whether log every procedure call and every published message
        */
-      Session(const QString &name, QIODevice &inout, Transport transport = Transport::Msgpack, bool debug = false);
+      Session(const QString &name, QIODevice &inout, MessageFormat transport = MessageFormat::Msgpack, bool debug = false);
+
+      Session(const QString &name, QWebSocket &websocket, MessageFormat messageFormat = MessageFormat::Json, bool debug = false);
+      Session(QWebSocket &websocket, MessageFormat messageFormat = MessageFormat::Json, bool debug = false);
 
       /**
        * Gets session name
@@ -261,6 +267,7 @@ namespace QWamp {
        */
       void provide(const QString& procedure, Endpoint::Function endpointFunction, Endpoint::Type endpointType = Endpoint::Sync, const QVariantMap& options = QVariantMap());
       void provideStatistics();
+      void provideGetMethods();
 
       const QHash<QString, CallStatistics> &callStatistics() const { return m_callStatistics; }
       inline void setEndpointWrapper(EndpointWrapper w) { endpointWrapper = w; }
@@ -280,13 +287,13 @@ namespace QWamp {
       bool isUint64(const QVariant &v);
       QVariant convertParam(const QVariant &arg);
       QVariantList convertParams(const QVariantList &args);
+      void init();
 
       /// Map of outstanding WAMP calls (request ID -> call).
       typedef QHash<quint64, CallRequest> CallRequests;
 
       /// Map of WAMP call ID -> call
       CallRequests callRequests;
-
 
       /// Map of outstanding WAMP subscribe requests (request ID -> subscribe request).
       typedef QHash<quint64, SubscribeRequest> SubscribeRequests;
@@ -362,6 +369,8 @@ namespace QWamp {
       /// Output stream this session runs on.
       QIODevice &m_out;
 
+      QWebSocket &m_websocket;
+
       bool m_isJoined;
       char m_bufferMsgLen[4];
       quint32 m_msgLen;
@@ -382,7 +391,8 @@ namespace QWamp {
       QMap<QString, QStringList> m_methods;
 
       EndpointWrapper endpointWrapper;
-      Transport m_transport;
+      MessageFormat m_messageFormat;
+      TransportType m_transportType;
 
       enum State {
         Initial,
@@ -438,6 +448,7 @@ namespace QWamp {
   };
 }
 
-Q_DECLARE_METATYPE(QWamp::Session::Transport)
+Q_DECLARE_METATYPE(QWamp::Session::MessageFormat)
+Q_DECLARE_METATYPE(QWamp::Session::TransportType)
 
 #endif // QWAMP_H
